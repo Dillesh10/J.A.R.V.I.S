@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S. Core Interface</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Background grid & glowing patterns -->
+    <div class="grid-bg"></div>
+    <div class="hologram-glow"></div>
+
+    <div class="dashboard-container">
+        <!-- Dashboard Header -->
+        <header class="main-header">
+            <div class="header-logo">
+                <span class="logo-icon"></span>
+                <h1>J.A.R.V.I.S. <span class="cyan-text">CORE INTERFACE</span></h1>
+            </div>
+            <div class="header-status">
+                <span class="pulse-indicator"></span>
+                <span class="status-text">SYSTEM SECURE // ONLINE</span>
+                <span class="system-time" id="system-time">00:00:00 AM</span>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-grid">
+            
+            <!-- Left Panel: System Details & Memory -->
+            <section class="panel left-panel">
+                <div class="widget system-info-widget">
+                    <div class="widget-header">
+                        <h2>SYSTEM DIAGNOSTICS</h2>
+                        <span class="accent-line"></span>
+                    </div>
+                    <div class="widget-content">
+                        <div class="stat-row"><span class="stat-label">OS:</span><span id="stat-os" class="stat-value">Loading...</span></div>
+                        <div class="stat-row"><span class="stat-label">HOSTNAME:</span><span id="stat-hostname" class="stat-value">Loading...</span></div>
+                        <div class="stat-row"><span class="stat-label">HARDWARE:</span><span id="stat-hardware" class="stat-value">Loading...</span></div>
+                        <div class="stat-row"><span class="stat-label">TIMEZONE:</span><span id="stat-timezone" class="stat-value">Local</span></div>
+                        <div class="stat-row"><span class="stat-label">SESSION:</span><span id="stat-uptime" class="stat-value">ACTIVE</span></div>
+                    </div>
+                </div>
+
+                <div class="widget memory-widget">
+                    <div class="widget-header">
+                        <h2>MEMORY BANK FACTS</h2>
+                        <span class="accent-line"></span>
+                    </div>
+                    <div class="widget-content">
+                        <ul id="memory-list" class="memory-list">
+                            <li class="empty-state">No facts stored in memory yet, sir.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Center Panel: The Arc Reactor & Conversations -->
+            <section class="panel center-panel">
+                <!-- Visualizer Area -->
+                <div class="reactor-container">
+                    <div class="reactor-inner">
+                        <canvas id="reactor-canvas" width="220" height="220"></canvas>
+                        <div class="reactor-status-display">
+                            <span id="reactor-state-text">IDLE</span>
+                        </div>
+                    </div>
+                    <div class="voice-feedback" id="voice-feedback">Ready for your input, sir.</div>
+                </div>
+
+                <!-- Chat Box widget -->
+                <div class="chat-widget">
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="message jarvis-message">
+                            <div class="msg-author">J.A.R.V.I.S.</div>
+                            <div class="msg-text">Good day, sir. Systems are fully operational and running locally on localhost. How may I assist you today?</div>
+                        </div>
+                    </div>
+
+                    <!-- Input Controls -->
+                    <div class="chat-input-area">
+                        <button class="control-btn mic-btn" id="mic-btn" title="Toggle Voice Recognition">
+                            <svg viewBox="0 0 24 24" class="svg-icon">
+                                <path fill="currentColor" d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/>
+                            </svg>
+                        </button>
+                        <input type="text" id="text-input" placeholder="Enter command or speak, sir..." autocomplete="off">
+                        <button class="control-btn send-btn" id="send-btn" title="Send Command">
+                            <svg viewBox="0 0 24 24" class="svg-icon">
+                                <path fill="currentColor" d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="voice-controls">
+                        <label class="control-toggle">
+                            <input type="checkbox" id="voice-output-toggle" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Voice Synthesis (TTS)</span>
+                        </label>
+                        <div class="voice-selector-container">
+                            <select id="voice-select" class="voice-select">
+                                <option value="">Loading voices...</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Agent Status & Console Logs -->
+            <section class="panel right-panel">
+                <div class="widget agent-status-widget">
+                    <div class="widget-header">
+                        <h2>ACTIVE AGENT REGISTRY</h2>
+                        <span class="accent-line"></span>
+                    </div>
+                    <div class="widget-content">
+                        <div class="agent-card active" id="agent-router">
+                            <div class="agent-info">
+                                <div class="agent-name">CORE ROUTER</div>
+                                <div class="agent-role">System Dispatcher</div>
+                            </div>
+                            <span class="agent-indicator"></span>
+                        </div>
+                        <div class="agent-card" id="agent-researcher">
+                            <div class="agent-info">
+                                <div class="agent-name">RESEARCHER</div>
+                                <div class="agent-role">Data & Web Harvester</div>
+                            </div>
+                            <span class="agent-indicator"></span>
+                        </div>
+                        <div class="agent-card" id="agent-coder">
+                            <div class="agent-info">
+                                <div class="agent-name">CODER / AUTOMATOR</div>
+                                <div class="agent-role">Executes Desktop/Web Operations</div>
+                            </div>
+                            <span class="agent-indicator"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="widget log-widget">
+                    <div class="widget-header">
+                        <h2>LIVE ROUTING TERMINAL</h2>
+                        <span class="accent-line"></span>
+                    </div>
+                    <div class="widget-content log-terminal" id="log-terminal">
+                        <div class="log-entry system"><span class="log-time">[12:00:00 PM]</span> <span class="log-tag">SYSTEM</span>: Console pipeline online. Ready for queries, sir.</div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

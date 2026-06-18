@@ -1,0 +1,6 @@
+google-generativeai
+python-dotenv
+colorama
+openai
+fastapi
+uvicorn

@@ -1,0 +1,16 @@
+# Environment variables (API KEYS)
+.env
+.env.local
+
+# Python standard
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# J.A.R.V.I.S temp files
+temp_screen.png
+*.wav
+*.mp3
+.DS_Store
