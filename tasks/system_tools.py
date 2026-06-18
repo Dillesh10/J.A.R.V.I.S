@@ -8,11 +8,18 @@ def get_current_datetime() -> str:
     Returns the current local date, time, day of the week, and timezone.
     Use this whenever the user asks what time it is, what day it is, or the current date.
     """
-    now = datetime.now()
+    from core.router import user_timezone_var
+    from zoneinfo import ZoneInfo
+    tz_name = user_timezone_var.get()
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    now = datetime.now(tz)
     return (
         f"Current date: {now.strftime('%A, %B %d, %Y')}\n"
         f"Current time: {now.strftime('%I:%M:%S %p')}\n"
-        f"Timezone: Local system time"
+        f"Timezone: {tz_name}"
     )
 
 

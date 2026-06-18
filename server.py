@@ -70,13 +70,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from core.router import user_timezone_var
+
 class ChatRequest(BaseModel):
     message: str
+    timezone: str = "UTC"
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     core = get_jarvis_core()
     
+    # Set the context variable so router & tools use the user's local timezone
+    token = user_timezone_var.set(request.timezone)
     try:
         # Run synchronous router logic
         response = core.process_input(request.message)
@@ -84,6 +89,8 @@ async def chat(request: ChatRequest):
     except Exception as e:
         logger.log(f"Error processing prompt: {e}", category="SYSTEM")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        user_timezone_var.reset(token)
 
 @app.get("/api/system_info")
 async def get_system_info():

@@ -9,6 +9,10 @@ from memory.context import MEMORY_TOOLS
 from tasks.system_tools import SYSTEM_TOOLS
 import core.logger as logger
 import datetime
+import contextvars
+from zoneinfo import ZoneInfo
+
+user_timezone_var = contextvars.ContextVar("user_timezone", default="UTC")
 
 # Load environment variables
 load_dotenv()
@@ -87,13 +91,19 @@ class JarvisRouter:
         """
         logger.log(f"Received user input: '{user_input}'", category="ROUTER")
         # Shortcut for real-time time/date queries to ensure 100% reliable local responses
+        tz_name = user_timezone_var.get()
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = ZoneInfo("UTC")
+            
         lower_input = user_input.lower()
         if "time" in lower_input or "what's the time" in lower_input or "what is the time" in lower_input:
-            now = datetime.datetime.now()
+            now = datetime.datetime.now(tz)
             time_str = now.strftime("%I:%M %p")
             return f"The current local time is {time_str}, sir."
         if "date" in lower_input or "today" in lower_input or "what is today" in lower_input or "what's today" in lower_input:
-            now = datetime.datetime.now()
+            now = datetime.datetime.now(tz)
             date_str = now.strftime("%A, %B %d, %Y")
             return f"Today is {date_str}, sir."
         # 1. Simple Case: Is it a vision request? "What am I looking at?"
