@@ -181,4 +181,15 @@ class JarvisRouter:
                 logger.log(f"Error: Tried to delegate to unknown sub-agent '{agent_name}'.", category="SYSTEM")
                 return f"Error: Tried to delegate to unknown sub-agent '{agent_name}'. Sir."
         
+        # Simple heuristic: if user asks to open a website, return a directive
+        lower_input = user_input.lower()
+        if "open " in lower_input:
+            # Extract the part after 'open'
+            parts = lower_input.split("open ", 1)[1].strip().split()
+            if parts:
+                url_candidate = parts[0]
+                # Add scheme if missing
+                if not (url_candidate.startswith('http://') or url_candidate.startswith('https://')):
+                    url_candidate = f"https://{url_candidate}"
+                return f"OPEN_URL:{url_candidate}"
         return router_response
