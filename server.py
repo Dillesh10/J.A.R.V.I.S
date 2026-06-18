@@ -17,6 +17,31 @@ from memory.context import memory_bank
 
 # Initialize J.A.R.V.I.S. Router
 jarvis_core = None
+jarvis_lock = threading.Lock()
+
+def get_jarvis_core():
+    global jarvis_core
+    with jarvis_lock:
+        if jarvis_core is None:
+            # Check for API Keys
+            from core.router import OPENROUTER_KEY
+            if not OPENROUTER_KEY or OPENROUTER_KEY == "your_openrouter_api_key_here":
+                logger.log("Failed to initialize: OPENROUTER_API_KEY is not set or is still the placeholder.", category="SYSTEM")
+                raise HTTPException(
+                    status_code=503,
+                    detail="API key configuration missing, sir. Please configure OPENROUTER_API_KEY in your Vercel Project Settings."
+                )
+            logger.log("Initializing J.A.R.V.I.S. Core Systems (lazy)...", category="SYSTEM")
+            try:
+                jarvis_core = JarvisRouter()
+                logger.log("J.A.R.V.I.S. Core Router Online.", category="SYSTEM")
+            except Exception as e:
+                logger.log(f"Failed to initialize JarvisRouter: {e}", category="SYSTEM")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Initialization error, sir: {str(e)}"
+                )
+        return jarvis_core
 
 def open_browser():
     """Waits for uvicorn to start and opens the browser."""
@@ -27,17 +52,9 @@ def open_browser():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize the Core Router
-    global jarvis_core
-    logger.log("Initializing J.A.R.V.I.S. Core Systems...", category="SYSTEM")
-    try:
-        jarvis_core = JarvisRouter()
-        logger.log("J.A.R.V.I.S. Core Router Online.", category="SYSTEM")
-    except Exception as e:
-        logger.log(f"Failed to initialize JarvisRouter: {e}", category="SYSTEM")
-    
-    # Start thread to open browser
-    threading.Thread(target=open_browser, daemon=True).start()
+    # Startup: Start thread to open browser (only when running locally)
+    if os.environ.get("VERCEL") != "1":
+        threading.Thread(target=open_browser, daemon=True).start()
     yield
     # Shutdown
     logger.log("Powering down J.A.R.V.I.S. web server. Goodbye, sir.", category="SYSTEM")
@@ -58,15 +75,11 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    global jarvis_core
-    if not jarvis_core:
-        raise HTTPException(status_code=503, detail="Core systems are offline, sir.")
+    core = get_jarvis_core()
     
     try:
-        # Run synchronous router logic in a separate thread to avoid blocking FastAPI event loop
-        # since it makes external cloud API requests which can block.
-        loop = threading.current_thread()
-        response = jarvis_core.process_input(request.message)
+        # Run synchronous router logic
+        response = core.process_input(request.message)
         return {"response": response}
     except Exception as e:
         logger.log(f"Error processing prompt: {e}", category="SYSTEM")

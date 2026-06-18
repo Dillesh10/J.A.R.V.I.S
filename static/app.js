@@ -261,13 +261,36 @@ async function sendUserMessage(text) {
             body: JSON.stringify({ message: text })
         });
         
+        if (!response.ok) {
+            let errorMsg = "I encountered an error processing your request, sir.";
+            try {
+                const data = await response.json();
+                errorMsg = data.detail || data.error || errorMsg;
+            } catch (jsonErr) {
+                // Not JSON
+            }
+            appendChatMessage("SYSTEM ERROR", errorMsg, "system");
+            setReactorState("IDLE");
+            speakText("An error occurred, sir.");
+            return;
+        }
+        
         const data = await response.json();
         
-        // Add JARVIS response
-        appendChatMessage("J.A.R.V.I.S.", data.response, "jarvis-message");
+        if (data.response) {
+            // Add JARVIS response
+            appendChatMessage("J.A.R.V.I.S.", data.response, "jarvis-message");
+            // Speak response out loud
+            speakText(data.response);
+        } else {
+            appendChatMessage("SYSTEM ERROR", "Empty response from server, sir.", "system");
+            speakText("I received an empty response, sir.");
+        }
         
-        // Speak response out loud
-        speakText(data.response);
+        // Ensure state returns to IDLE if TTS is disabled or finished
+        if (!voiceOutputToggleEl.checked) {
+            setReactorState("IDLE");
+        }
         
     } catch (err) {
         appendChatMessage("SYSTEM ERROR", "Unable to communicate with local JARVIS router server.", "system");
