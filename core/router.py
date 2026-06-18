@@ -8,6 +8,7 @@ from vision.eyes import VISION_TOOLS
 from memory.context import MEMORY_TOOLS
 from tasks.system_tools import SYSTEM_TOOLS
 import core.logger as logger
+import datetime
 
 # Load environment variables
 load_dotenv()
@@ -85,7 +86,16 @@ class JarvisRouter:
         Tries OpenRouter first for basic text, falls back to Gemini for tools/vision.
         """
         logger.log(f"Received user input: '{user_input}'", category="ROUTER")
-        
+        # Shortcut for real-time time/date queries to ensure 100% reliable local responses
+        lower_input = user_input.lower()
+        if "time" in lower_input or "what's the time" in lower_input or "what is the time" in lower_input:
+            now = datetime.datetime.now()
+            time_str = now.strftime("%I:%M %p")
+            return f"The current local time is {time_str}, sir."
+        if "date" in lower_input or "today" in lower_input or "what is today" in lower_input or "what's today" in lower_input:
+            now = datetime.datetime.now()
+            date_str = now.strftime("%A, %B %d, %Y")
+            return f"Today is {date_str}, sir."
         # 1. Simple Case: Is it a vision request? "What am I looking at?"
         vision_keywords = ["screen", "looking at", "see", "visible", "read this"]
         is_vision_request = any(key in user_input.lower() for key in vision_keywords)

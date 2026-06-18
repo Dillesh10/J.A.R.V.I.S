@@ -278,10 +278,28 @@ async function sendUserMessage(text) {
         const data = await response.json();
         
         if (data.response) {
-            // Add JARVIS response
-            appendChatMessage("J.A.R.V.I.S.", data.response, "jarvis-message");
-            // Speak response out loud
-            speakText(data.response);
+            // Check for special OPEN_URL directive
+            if (data.response.startsWith('OPEN_URL:')) {
+                const url = data.response.substring('OPEN_URL:'.length);
+                // Provide a clickable link for the user
+                const linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer">Open ${url}</a>`;
+                appendChatMessage('SYSTEM', linkHtml, 'system');
+                // Attempt to open programmatically as a fallback (may be blocked)
+                try {
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                } catch (e) { console.warn('Failed to open URL programmatically', e); }
+            } else {
+                // Regular JARVIS response
+                appendChatMessage("J.A.R.V.I.S.", data.response, "jarvis-message");
+                // Speak response out loud
+                speakText(data.response);
+            }
         } else {
             appendChatMessage("SYSTEM ERROR", "Empty response from server, sir.", "system");
             speakText("I received an empty response, sir.");
@@ -312,24 +330,28 @@ textInputEl.addEventListener('keypress', (e) => {
 });
 
 // Helper to append message to Chat Container
-function appendChatMessage(sender, text, cssClass) {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `message ${cssClass}`;
-    
-    const authorDiv = document.createElement('div');
-    authorDiv.className = 'msg-author';
-    authorDiv.textContent = sender;
-    
-    const textDiv = document.createElement('div');
-    textDiv.className = 'msg-text';
-    textDiv.textContent = text;
-    
-    msgDiv.appendChild(authorDiv);
-    msgDiv.appendChild(textDiv);
-    
-    chatMessagesEl.appendChild(msgDiv);
-    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-}
+        // Append message to chat UI
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${cssClass}`;
+        
+        const authorDiv = document.createElement('div');
+        authorDiv.className = 'msg-author';
+        authorDiv.textContent = sender;
+        
+        const textDiv = document.createElement('div');
+        textDiv.className = 'msg-text';
+        // Render HTML for system messages (e.g., clickable links)
+        if (cssClass === 'system') {
+            textDiv.innerHTML = text;
+        } else {
+            textDiv.textContent = text;
+        }
+        
+        msgDiv.appendChild(authorDiv);
+        msgDiv.appendChild(textDiv);
+        
+        chatMessagesEl.appendChild(msgDiv);
+        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 
 // 7. Polling logs & memory bank (1.5 seconds)
 async function pollLogsAndMemory() {
