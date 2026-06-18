@@ -330,6 +330,7 @@ textInputEl.addEventListener('keypress', (e) => {
 });
 
 // Helper to append message to Chat Container
+function appendChatMessage(sender, text, cssClass) {
         // Append message to chat UI
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${cssClass}`;
@@ -352,6 +353,7 @@ textInputEl.addEventListener('keypress', (e) => {
         
         chatMessagesEl.appendChild(msgDiv);
         chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
 
 // 7. Polling logs & memory bank (1.5 seconds)
 async function pollLogsAndMemory() {
