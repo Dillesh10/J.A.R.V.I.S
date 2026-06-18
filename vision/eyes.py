@@ -1,12 +1,12 @@
 import os
-import google.generativeai as genai
-from dotenv import load_dotenv
+import google.generativeai as genai  # type: ignore
+from dotenv import load_dotenv  # type: ignore
 
 def look_at_screen() -> str:
     """Takes a screenshot of the user's screen, analyzes it using Gemini Vision, and returns a detailed text description of what is currently visible."""
     try:
-        import mss
-        from PIL import Image
+        import mss  # type: ignore
+        from PIL import Image  # type: ignore
     except ImportError:
         return "Error: Screen capture libraries (mss, Pillow) are not installed on this system, sir."
         

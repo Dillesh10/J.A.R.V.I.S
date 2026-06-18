@@ -1,7 +1,7 @@
 import os
-from openai import OpenAI
-import google.generativeai as genai
-from dotenv import load_dotenv
+from openai import OpenAI  # type: ignore
+import google.generativeai as genai  # type: ignore
+from dotenv import load_dotenv  # type: ignore
 from agents.researcher import get_researcher_agent
 from agents.coder import get_coder_agent
 from vision.eyes import VISION_TOOLS

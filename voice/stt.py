@@ -6,10 +6,10 @@ def listen() -> str:
     Listens to the microphone using sounddevice (bypassing PyAudio) and returns the transcribed text.
     """
     try:
-        import speech_recognition as sr
-        import sounddevice as sd
-        import soundfile as sf
-        import numpy as np
+        import speech_recognition as sr  # type: ignore
+        import sounddevice as sd  # type: ignore
+        import soundfile as sf  # type: ignore
+        import numpy as np  # type: ignore
     except ImportError:
         print("[Voice Input Error]: Speech recognition libraries (speech_recognition, sounddevice, soundfile, numpy) not installed.")
         return ""

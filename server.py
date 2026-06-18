@@ -5,10 +5,10 @@ import platform
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException  # type: ignore
+from fastapi.staticfiles import StaticFiles  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from pydantic import BaseModel  # type: ignore
 
 # J.A.R.V.I.S imports
 from core.router import JarvisRouter
@@ -101,6 +101,6 @@ async def get_logs():
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn  # type: ignore
     # Run server on localhost port 8000
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

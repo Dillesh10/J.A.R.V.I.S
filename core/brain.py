@@ -1,10 +1,10 @@
 import os
 import json
 import inspect
-from openai import OpenAI
-import google.generativeai as genai
+from openai import OpenAI  # type: ignore
+import google.generativeai as genai  # type: ignore
 from typing import List, Callable, Dict, Any, Optional
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 import core.logger as logger
 
 load_dotenv()

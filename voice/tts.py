@@ -3,17 +3,17 @@ import asyncio
 import tempfile
 
 async def _generate_audio(text: str, temp_path: str, voice: str = "en-GB-RyanNeural"):
-    import edge_tts
+    import edge_tts  # type: ignore
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(temp_path)
 
 def speak(text: str):
     """Synchronous wrapper to speak text out loud."""
     try:
-        import edge_tts
+        import edge_tts  # type: ignore
         # playsound can fail to import on non-GUI headless systems
         try:
-            from playsound import playsound
+            from playsound import playsound  # type: ignore
             HAS_PLAYSOUND = True
         except ImportError:
             HAS_PLAYSOUND = False
