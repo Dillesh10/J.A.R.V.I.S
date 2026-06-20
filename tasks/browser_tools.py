@@ -16,7 +16,9 @@ def _ensure_browser():
     global _browser, _page, _playwright
     with _lock:
         if _browser is None:
-            from playwright.sync_api import sync_playwright
+            import importlib
+            playwright_sync = importlib.import_module("playwright.sync_api")
+            sync_playwright = playwright_sync.sync_playwright
             _playwright = sync_playwright().start()
             _browser = _playwright.chromium.launch(headless=False, slow_mo=100)
             _page = _browser.new_page()
@@ -32,9 +34,13 @@ def search_and_play_youtube(query: str) -> str:
     Use this when the user asks to play or open a song, music video, or any YouTube content.
     Example: search_and_play_youtube('Bohemian Rhapsody Queen')
     """
+    url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+    if os.environ.get("VERCEL") == "1":
+        return f"I am running in the cloud (Vercel), sir. I have opened the YouTube search for '{query}' on your browser. OPEN_URL:{url}"
+        
     try:
         page = _ensure_browser()
-        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        search_url = url
         page.goto(search_url, wait_until="domcontentloaded", timeout=15000)
         page.wait_for_timeout(2000)
 
@@ -43,14 +49,14 @@ def search_and_play_youtube(query: str) -> str:
         if first_video:
             first_video.click()
             page.wait_for_timeout(2000)
-            return f"Now playing '{query}' on YouTube, sir."
+            video_url = page.url
+            return f"Now playing '{query}' on YouTube, sir. OPEN_URL:{video_url}"
         else:
-            return f"YouTube search for '{query}' is open, but I could not auto-click the first result, sir."
+            return f"YouTube search for '{query}' is open, but I could not auto-click the first result, sir. OPEN_URL:{search_url}"
     except Exception as e:
         # Fallback: open in default browser
-        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
         webbrowser.open(url)
-        return f"Opened YouTube search for '{query}' in your browser, sir. (Browser automation error: {str(e)})"
+        return f"Opened YouTube search for '{query}' in your browser, sir. OPEN_URL:{url} (Browser automation error: {str(e)})"
 
 
 # ─── General Browser Navigation ────────────────────────────────────────────
@@ -61,6 +67,10 @@ def browser_navigate(url: str) -> str:
     Use this to open websites like Facebook, Google, Twitter, etc.
     Example: browser_navigate('https://www.facebook.com')
     """
+    if os.environ.get("VERCEL") == "1":
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "https://" + url
+        return f"I am running in the cloud (Vercel), sir. I have opened the URL '{url}' in your default browser. OPEN_URL:{url}"
     try:
         if not url.startswith("http://") and not url.startswith("https://"):
             url = "https://" + url
@@ -77,6 +87,8 @@ def browser_click(text_or_selector: str) -> str:
     Clicks a button, link, or element on the current webpage by its visible text or CSS selector.
     Example: browser_click('Sign Up') or browser_click('Create new account')
     """
+    if os.environ.get("VERCEL") == "1":
+        return "I am running in the cloud (Vercel), sir. Browser interaction tools (like clicking elements) are only available when running J.A.R.V.I.S. locally."
     try:
         page = _ensure_browser()
         # Try by visible text first
@@ -97,6 +109,8 @@ def browser_type_text(selector_or_label: str, text: str) -> str:
     Finds an input field by its label, placeholder, or CSS selector and types the given text into it.
     Example: browser_type_text('Email', 'john@example.com') or browser_type_text('First name', 'John')
     """
+    if os.environ.get("VERCEL") == "1":
+        return "I am running in the cloud (Vercel), sir. Browser interaction tools (like typing text) are only available when running J.A.R.V.I.S. locally."
     try:
         page = _ensure_browser()
         # Try by placeholder
@@ -123,6 +137,8 @@ def browser_get_page_text() -> str:
     Returns the visible text content of the current webpage. Use this to read what is on the screen
     before deciding what to click or type next during a multi-step task like filling a form.
     """
+    if os.environ.get("VERCEL") == "1":
+        return "I am running in the cloud (Vercel), sir. Browser interaction tools (like reading page content) are only available when running J.A.R.V.I.S. locally."
     try:
         page = _ensure_browser()
         # Get current URL
@@ -139,6 +155,8 @@ def browser_press_key(key: str) -> str:
     Presses a keyboard key in the browser. Useful for Enter, Tab, Escape, etc.
     Example: browser_press_key('Enter') or browser_press_key('Tab')
     """
+    if os.environ.get("VERCEL") == "1":
+        return "I am running in the cloud (Vercel), sir. Browser interaction tools (like pressing keys) are only available when running J.A.R.V.I.S. locally."
     try:
         page = _ensure_browser()
         page.keyboard.press(key)
@@ -150,6 +168,8 @@ def browser_press_key(key: str) -> str:
 
 def browser_close() -> str:
     """Closes the automated browser window."""
+    if os.environ.get("VERCEL") == "1":
+        return "I am running in the cloud (Vercel), sir. No browser session is active in the cloud environment."
     global _browser, _page, _playwright
     with _lock:
         try:

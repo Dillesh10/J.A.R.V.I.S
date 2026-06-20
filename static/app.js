@@ -281,27 +281,51 @@ async function sendUserMessage(text) {
         const data = await response.json();
         
         if (data.response) {
-            // Check for special OPEN_URL directive
-            if (data.response.startsWith('OPEN_URL:')) {
-                const url = data.response.substring('OPEN_URL:'.length);
-                // Provide a clickable link for the user
-                const linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer">Open ${url}</a>`;
-                appendChatMessage('SYSTEM', linkHtml, 'system');
-                // Attempt to open programmatically as a fallback (may be blocked)
-                try {
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                } catch (e) { console.warn('Failed to open URL programmatically', e); }
-            } else {
+            let processedResponse = data.response;
+            
+            // Search for OPEN_URL: followed by non-whitespace characters
+            const openUrlRegex = /OPEN_URL:([^\s,;]+)/g;
+            let match;
+            const urlsToOpen = [];
+            
+            while ((match = openUrlRegex.exec(data.response)) !== null) {
+                let url = match[1];
+                // Strip trailing punctuation
+                if (url.endsWith('.') || url.endsWith(',') || url.endsWith(')')) {
+                    url = url.slice(0, -1);
+                }
+                urlsToOpen.push(url);
+            }
+            
+            if (urlsToOpen.length > 0) {
+                urlsToOpen.forEach(url => {
+                    // Provide a clickable link in the chat UI
+                    const linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer">Open ${url}</a>`;
+                    appendChatMessage('SYSTEM', linkHtml, 'system');
+                    
+                    // Attempt programmatic open
+                    try {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    } catch (e) {
+                        console.warn('Failed to open URL programmatically', e);
+                    }
+                });
+                
+                // Clean the directives out of the conversational response
+                processedResponse = processedResponse.replace(/OPEN_URL:[^\s]+/g, '').replace(/\s+/g, ' ').trim();
+            }
+            
+            if (processedResponse) {
                 // Regular JARVIS response
-                appendChatMessage("J.A.R.V.I.S.", data.response, "jarvis-message");
+                appendChatMessage("J.A.R.V.I.S.", processedResponse, "jarvis-message");
                 // Speak response out loud
-                speakText(data.response);
+                speakText(processedResponse);
             }
         } else {
             appendChatMessage("SYSTEM ERROR", "Empty response from server, sir.", "system");

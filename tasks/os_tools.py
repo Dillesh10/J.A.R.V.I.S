@@ -33,6 +33,8 @@ def _get_desktop_path() -> str:
 
 def create_folder(folder_name: str) -> str:
     """Creates a new directory on the user's Desktop. Useful when the user asks to make a folder."""
+    if os.environ.get("VERCEL") == "1":
+        return "I am currently running in the Cloud (Vercel), sir. I cannot create folders on your local Desktop. Please run JARVIS locally to enable Desktop automation."
     desktop = _get_desktop_path()
     path = os.path.join(desktop, folder_name)
     try:
@@ -44,6 +46,8 @@ def create_folder(folder_name: str) -> str:
 
 def delete_folder(folder_name: str) -> str:
     """Deletes a directory from the user's Desktop. Ensure you confirm the name before deleting."""
+    if os.environ.get("VERCEL") == "1":
+        return "I am currently running in the Cloud (Vercel), sir. I cannot delete folders from your local Desktop. Please run JARVIS locally to enable Desktop automation."
     desktop = _get_desktop_path()
     path = os.path.join(desktop, folder_name)
     try:
@@ -58,6 +62,8 @@ def delete_folder(folder_name: str) -> str:
 
 def edit_file(file_name: str, content: str) -> str:
     """Creates or overwrites a text file on the user's Desktop with the provided content."""
+    if os.environ.get("VERCEL") == "1":
+        return f"I am currently running in the Cloud (Vercel), sir. I cannot create or write the file '{file_name}' to your local Desktop. Please run JARVIS locally to enable Desktop automation."
     desktop = _get_desktop_path()
     path = os.path.join(desktop, file_name)
     try:
@@ -70,6 +76,8 @@ def edit_file(file_name: str, content: str) -> str:
 
 def read_file(file_name: str) -> str:
     """Reads the content of a text file from the user's Desktop."""
+    if os.environ.get("VERCEL") == "1":
+        return f"I am currently running in the Cloud (Vercel), sir. I cannot read the file '{file_name}' from your local Desktop. Please run JARVIS locally to enable Desktop automation."
     desktop = _get_desktop_path()
     path = os.path.join(desktop, file_name)
     try:
@@ -85,6 +93,8 @@ def read_file(file_name: str) -> str:
 
 def open_application(app_name: str) -> str:
     """Opens an application on Windows by name. For example: 'notepad', 'calculator', 'chrome', 'spotify'."""
+    if os.environ.get("VERCEL") == "1":
+        return f"I am currently running in the Cloud (Vercel), sir. I cannot launch '{app_name}' on your local computer. Please run JARVIS locally to enable Desktop automation."
     try:
         subprocess.Popen(app_name, shell=True)
         return f"Application '{app_name}' has been launched, sir."
@@ -97,10 +107,11 @@ def open_website(url: str) -> str:
     try:
         if not url.startswith("http://") and not url.startswith("https://"):
             url = "https://" + url
-        webbrowser.open(url)
-        return f"Opening '{url}' in your default browser, sir."
+        if os.environ.get("VERCEL") != "1":
+            webbrowser.open(url)
+        return f"Opening '{url}' in your default browser, sir. OPEN_URL:{url}"
     except Exception as e:
-        return f"Error opening website '{url}': {str(e)}"
+        return f"Error opening website '{url}': {str(e)} OPEN_URL:{url}"
 
 
 OS_TOOLS = [create_folder, delete_folder, edit_file, read_file, open_application, open_website]

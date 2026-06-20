@@ -122,6 +122,9 @@ class UnifiedBrain:
                                     match = re.search(pattern, content)
                                     if match:
                                         args_str = match.group(1).strip()
+                                        # Clean up common keyword arguments to positional
+                                        for kw in ["query=", "url=", "folder_name=", "file_name=", "content=", "app_name=", "selector_or_label=", "text_or_selector=", "text=", "key=", "fact="]:
+                                            args_str = args_str.replace(kw, "")
                                         try:
                                             # Try to parse arguments. Example: 'Jarvis dot test' -> tuple
                                             if not args_str:
@@ -140,7 +143,7 @@ class UnifiedBrain:
                                             break
                                         except Exception as e:
                                             logger.log(f"[{self.name} Brain] Fallback parse failed for tool '{tool_name}': {e}", category="SYSTEM")
-                                            tool_result = f"Error executing tool '{tool_name}' with arguments {args_str}: {str(e)}. Please correct your arguments (like providing 'url' or 'content') and try again."
+                                            tool_result = f"Error executing tool '{tool_name}' with arguments {args_str}: {str(e)}. Please correct your arguments and try again."
                                             messages.append({"role": "user", "content": f"[SYSTEM MESSAGE]: {tool_result}"})
                                             executed_any_tool = True
                                             break
@@ -148,9 +151,9 @@ class UnifiedBrain:
                             # If we executed a tool textually, loop again for model response
                             if executed_any_tool:
                                 continue
-
+ 
                             return content if content else "I am processing your request, sir. Just a moment."
-
+ 
                         for tool_call in assistant_message.tool_calls:
                             function_name = tool_call.function.name
                             try:
@@ -178,6 +181,12 @@ class UnifiedBrain:
                                 })
                             else:
                                 logger.log(f"[{self.name} Brain Warning] Unknown tool call '{function_name}' requested by model.", category="SYSTEM")
+                                messages.append({
+                                    "tool_call_id": tool_call.id,
+                                    "role": "tool",
+                                    "name": function_name,
+                                    "content": f"Error: Tool '{function_name}' is not supported by this agent. Available tools: {list(self.tool_map.keys())}",
+                                })
                         
                     return content if content else "I am still thinking, sir."
                 
