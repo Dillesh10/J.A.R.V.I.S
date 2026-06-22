@@ -1,5 +1,4 @@
 from agents.base_agent import BaseAgent
-from tasks.browser_tools import BROWSER_TOOLS
 
 CODER_PROMPT = """
 You are the J.A.R.V.I.S. Coding Sub-System and Desktop Automation Engine.
@@ -58,6 +57,13 @@ def get_coder_agent():
             "close_application",
             "launch_url",
             "clipboard_read",
-            "clipboard_write"
-        ] + BROWSER_TOOLS
+            "clipboard_write",
+            "browser_navigate",
+            "browser_click",
+            "browser_type_text",
+            "browser_get_page_text",
+            "browser_press_key",
+            "browser_close",
+            "search_and_play_youtube"
+        ]
     )
