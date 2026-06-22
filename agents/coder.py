@@ -17,6 +17,13 @@ FILESYSTEM TOOLS:
 - append_file(file_name, content): Append content to a file on the Desktop
 - search_files(query): Search for files on the Desktop matching the query pattern
 
+SHELL & TERMINAL TOOLS:
+- execute_command(command, cwd, background, confirmed): Run terminal commands locally. Run development workflows (e.g. git, npm, pip, python scripts).
+  * Whitelisted safe read-only commands (git status, dir, echo) bypass confirmation.
+  * All other commands require confirmed=True.
+  * Set background=True for long-running servers/daemons.
+- manage_background_process(action, pid): Monitors background jobs or terminates them ('list' or 'kill').
+
 APPLICATION & OS TOOLS:
 - open_application(app_name): Open an application locally
 - close_application(app_name, confirmed): Close/kill a running process by name (requires confirmed=True)
@@ -64,6 +71,8 @@ def get_coder_agent():
             "browser_get_page_text",
             "browser_press_key",
             "browser_close",
-            "search_and_play_youtube"
+            "search_and_play_youtube",
+            "execute_command",
+            "manage_background_process"
         ]
     )
