@@ -1,5 +1,4 @@
 from agents.base_agent import BaseAgent
-from tasks.web_tools import WEB_TOOLS
 
 RESEARCHER_PROMPT = """
 You are the J.A.R.V.I.S. Research Sub-System.
@@ -14,5 +13,5 @@ def get_researcher_agent():
     return BaseAgent(
         name="Researcher",
         system_instruction=RESEARCHER_PROMPT,
-        tools=WEB_TOOLS # Equipped with Research Tools
+        tools=["web_search"]
     )

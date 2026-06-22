@@ -4,9 +4,7 @@ import google.generativeai as genai  # type: ignore
 from dotenv import load_dotenv  # type: ignore
 from agents.researcher import get_researcher_agent
 from agents.coder import get_coder_agent
-from vision.eyes import VISION_TOOLS
-from memory.context import MEMORY_TOOLS
-from tasks.system_tools import SYSTEM_TOOLS
+from tools.registry import discover_tools, tool_registry
 import core.logger as logger
 import datetime
 import contextvars
@@ -66,13 +64,20 @@ class JarvisRouter:
             "nousresearch/hermes-3-llama-3.1-405b:free"
         ]
 
-        # Gemini Client (Required for Vision/Tools)
         if GEMINI_KEY and GEMINI_KEY != "your_gemini_api_key_here":
             genai.configure(api_key=GEMINI_KEY)
+            discover_tools()
+            router_tools = []
+            for tool_name in ["look_at_screen", "store_fact", "recall_facts", "get_current_datetime", "get_system_info"]:
+                try:
+                    router_tools.append(tool_registry.get_tool(tool_name).execute)
+                except Exception as e:
+                    logger.log(f"[Router] Failed to load tool '{tool_name}' for Gemini: {e}", category="SYSTEM")
+                    
             self.gemini_model = genai.GenerativeModel(
                 model_name="gemini-1.5-flash",
                 system_instruction=ROUTER_PROMPT,
-                tools=VISION_TOOLS + MEMORY_TOOLS + SYSTEM_TOOLS
+                tools=router_tools if router_tools else None
             )
             self.gemini_chat = self.gemini_model.start_chat(enable_automatic_function_calling=True)
         else:
