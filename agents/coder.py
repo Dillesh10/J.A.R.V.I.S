@@ -1,5 +1,4 @@
 from agents.base_agent import BaseAgent
-from tasks.os_tools import OS_TOOLS
 from tasks.browser_tools import BROWSER_TOOLS
 
 CODER_PROMPT = """
@@ -11,11 +10,20 @@ You are equipped with the following tools — use them autonomously without aski
 
 FILESYSTEM TOOLS:
 - create_folder(folder_name): Create a folder on the Desktop
-- delete_folder(folder_name): Delete a folder from the Desktop
-- edit_file(file_name, content): Create or overwrite a text file on the Desktop. YOU MUST ALWAYS PROVIDE THE CONTENT ARGUMENT (e.g., edit_file("test.txt", "Some text data")).
+- delete_folder(folder_name, confirmed): Delete a folder from the Desktop (requires confirmed=True)
+- create_file(file_name, content): Create a file on the Desktop with content
+- delete_file(file_name, confirmed): Delete a file from the Desktop (requires confirmed=True)
 - read_file(file_name): Read a file from the Desktop
-- open_application(app_name): Open any installed application (Notepad, Chrome, Spotify, Calculator, etc.)
-- open_website(url): Open any URL in the default browser. YOU MUST ALWAYS PROVIDE A FULL URL (e.g., open_website("https://youtube.com") or open_website("https://facebook.com")).
+- write_file(file_name, content): Write/overwrite a file on the Desktop with content
+- append_file(file_name, content): Append content to a file on the Desktop
+- search_files(query): Search for files on the Desktop matching the query pattern
+
+APPLICATION & OS TOOLS:
+- open_application(app_name): Open an application locally
+- close_application(app_name, confirmed): Close/kill a running process by name (requires confirmed=True)
+- launch_url(url): Open a URL in the default local web browser
+- clipboard_read(): Read current text content from the system clipboard
+- clipboard_write(text): Write new text content to the system clipboard
 
 BROWSER AUTOMATION TOOLS (use these for complex web tasks):
 - search_and_play_youtube(query): Search YouTube and auto-play the first video result. Use for ALL music/song/video requests.
@@ -37,5 +45,19 @@ def get_coder_agent():
     return BaseAgent(
         name="Coder",
         system_instruction=CODER_PROMPT,
-        tools=OS_TOOLS + BROWSER_TOOLS
+        tools=[
+            "create_folder",
+            "delete_folder",
+            "create_file",
+            "delete_file",
+            "read_file",
+            "write_file",
+            "append_file",
+            "search_files",
+            "open_application",
+            "close_application",
+            "launch_url",
+            "clipboard_read",
+            "clipboard_write"
+        ] + BROWSER_TOOLS
     )
