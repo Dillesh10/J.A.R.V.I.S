@@ -17,10 +17,10 @@ class BaseAgent:
             tools=self.tools
         )
 
-    def process_message(self, message: str) -> str:
+    def process_message(self, message: str, session_id: str = "default") -> str:
         """
         Sends a message to this specific agent and returns the text response.
         Handles rate limits internally.
         """
         # UnifiedBrain.process_message now returns the best available text response
-        return self.brain.process_message(message)
+        return self.brain.process_message(message, session_id)

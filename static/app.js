@@ -244,7 +244,108 @@ micBtnEl.addEventListener('click', () => {
     }
 });
 
-// 6. Send message to backend
+// 6. WebSocket Connection Setup
+let socket = null;
+
+function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+    
+    socket = new WebSocket(wsUrl);
+    
+    socket.onopen = () => {
+        console.log("WebSocket connected.");
+        appendChatMessage("SYSTEM", "Secure WebSocket pipeline active, sir.", "system");
+    };
+    
+    socket.onclose = () => {
+        console.warn("WebSocket disconnected. Reconnecting in 3 seconds...");
+        appendChatMessage("SYSTEM", "Secure connection lost. Attempting reconnection, sir...", "system");
+        setTimeout(connectWebSocket, 3000);
+    };
+    
+    socket.onerror = (err) => {
+        console.error("WebSocket error:", err);
+    };
+    
+    socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        handleWebSocketMessage(message);
+    };
+}
+
+function handleWebSocketMessage(data) {
+    if (data.type === "log") {
+        const logDiv = document.createElement('div');
+        const catClass = data.category.toLowerCase();
+        logDiv.className = `log-entry ${catClass}`;
+        logDiv.innerHTML = `<span class="log-time">[${data.timestamp}]</span> <span class="log-tag">${data.category}</span>: ${escapeHTML(data.message)}`;
+        logTerminalEl.appendChild(logDiv);
+        logTerminalEl.scrollTop = logTerminalEl.scrollHeight;
+        
+        // Track active sub-agents from logs
+        updateActiveAgentsFromLog(data);
+    } else if (data.type === "chat") {
+        setReactorState("IDLE");
+        if (data.response) {
+            let processedResponse = data.response;
+            
+            // Search for OPEN_URL: followed by non-whitespace characters
+            const openUrlRegex = /OPEN_URL:([^\s,;]+)/g;
+            let match;
+            const urlsToOpen = [];
+            
+            while ((match = openUrlRegex.exec(data.response)) !== null) {
+                let url = match[1];
+                // Strip trailing punctuation
+                if (url.endsWith('.') || url.endsWith(',') || url.endsWith(')')) {
+                    url = url.slice(0, -1);
+                }
+                urlsToOpen.push(url);
+            }
+            
+            if (urlsToOpen.length > 0) {
+                urlsToOpen.forEach(url => {
+                    // Provide a clickable link in the chat UI
+                    const linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer">Open ${url}</a>`;
+                    appendChatMessage('SYSTEM', linkHtml, 'system');
+                    
+                    // Attempt programmatic open
+                    try {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    } catch (e) {
+                        console.warn('Failed to open URL programmatically', e);
+                    }
+                });
+                
+                // Clean the directives out of the conversational response
+                processedResponse = processedResponse.replace(/OPEN_URL:[^\s]+/g, '').replace(/\s+/g, ' ').trim();
+            }
+            
+            if (processedResponse) {
+                appendChatMessage("J.A.R.V.I.S.", processedResponse, "jarvis-message");
+                speakText(processedResponse);
+            }
+        }
+        if (!voiceOutputToggleEl.checked) {
+            setReactorState("IDLE");
+        }
+    } else if (data.type === "error") {
+        appendChatMessage("SYSTEM ERROR", data.message || "An error occurred, sir.", "system");
+        setReactorState("IDLE");
+        speakText("An error occurred, sir.");
+    }
+}
+
+// Initialize WebSocket
+connectWebSocket();
+
 async function sendUserMessage(text) {
     if (!text.trim()) return;
     
@@ -254,6 +355,16 @@ async function sendUserMessage(text) {
     
     setReactorState("THINKING");
     
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            message: text,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+            session_id: "default"
+        }));
+        return;
+    }
+    
+    // Fallback to fetch REST API if WebSocket is not open
     try {
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -382,29 +493,9 @@ function appendChatMessage(sender, text, cssClass) {
         chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
 
-// 7. Polling logs & memory bank (1.5 seconds)
-async function pollLogsAndMemory() {
+// 7. Polling memory bank (every 3 seconds)
+async function pollMemory() {
     try {
-        // Poll Logs
-        const logRes = await fetch('/api/logs');
-        const logs = await logRes.json();
-        
-        if (logs && logs.length > 0) {
-            logs.forEach(log => {
-                const logDiv = document.createElement('div');
-                const catClass = log.category.toLowerCase();
-                logDiv.className = `log-entry ${catClass}`;
-                
-                logDiv.innerHTML = `<span class="log-time">[${log.timestamp}]</span> <span class="log-tag">${log.category}</span>: ${escapeHTML(log.message)}`;
-                logTerminalEl.appendChild(logDiv);
-                
-                // Track active sub-agents from logs
-                updateActiveAgentsFromLog(log);
-            });
-            logTerminalEl.scrollTop = logTerminalEl.scrollHeight;
-        }
-
-        // Poll Memory facts
         const memRes = await fetch('/api/memory');
         const memory = await memRes.json();
         
@@ -420,11 +511,11 @@ async function pollLogsAndMemory() {
         }
 
     } catch (err) {
-        console.warn("Polling error:", err);
+        console.warn("Memory polling error:", err);
     }
 }
-setInterval(pollLogsAndMemory, 1500);
-pollLogsAndMemory(); // Run immediately
+setInterval(pollMemory, 3000);
+pollMemory(); // Run immediately
 
 function updateActiveAgentsFromLog(log) {
     const msg = log.message.toLowerCase();

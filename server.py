@@ -5,10 +5,12 @@ import platform
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException  # type: ignore
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # type: ignore
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from pydantic import BaseModel  # type: ignore
+import asyncio
+import anyio
 
 # J.A.R.V.I.S imports
 from core.router import JarvisRouter
@@ -71,6 +73,64 @@ app.add_middleware(
 )
 
 from core.router import user_timezone_var
+
+@app.websocket("/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    core = get_jarvis_core()
+    
+    # Task to stream log entries to client in real time
+    async def log_publisher():
+        try:
+            while True:
+                logs = logger.get_logs(clear=True)
+                if logs:
+                    for log_entry in logs:
+                        await websocket.send_json({
+                            "type": "log",
+                            "timestamp": log_entry["timestamp"],
+                            "category": log_entry["category"],
+                            "message": log_entry["message"]
+                        })
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+    publisher_task = asyncio.create_task(log_publisher())
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            user_message = data.get("message", "")
+            timezone = data.get("timezone", "UTC")
+            session_id = data.get("session_id", "default")
+            
+            if not user_message:
+                continue
+                
+            token = user_timezone_var.set(timezone)
+            try:
+                # Process synchronous routing logic in worker thread to prevent blocking Uvicorn
+                response = await anyio.to_thread.run_sync(
+                    core.process_input, user_message, session_id
+                )
+                await websocket.send_json({
+                    "type": "chat",
+                    "response": response
+                })
+            except Exception as e:
+                logger.log(f"Error processing WebSocket message: {e}", category="SYSTEM")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e)
+                })
+            finally:
+                user_timezone_var.reset(token)
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        publisher_task.cancel()
 
 class ChatRequest(BaseModel):
     message: str

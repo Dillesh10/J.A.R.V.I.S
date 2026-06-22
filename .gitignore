@@ -14,3 +14,5 @@ temp_screen.png
 *.wav
 *.mp3
 .DS_Store
+*.db
+

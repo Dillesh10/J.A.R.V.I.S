@@ -84,12 +84,23 @@ class JarvisRouter:
             "Coder": get_coder_agent()
         }
 
-    def process_input(self, user_input: str) -> str:
+    def process_input(self, user_input: str, session_id: str = "default") -> str:
         """
-        Routes the input to the best provider. 
-        Tries OpenRouter first for basic text, falls back to Gemini for tools/vision.
+        Public entry point that handles user input routing and automatically
+        persists the conversation session logs to SQLite database.
         """
-        logger.log(f"Received user input: '{user_input}'", category="ROUTER")
+        result = self._process_input_core(user_input, session_id)
+        
+        # Save both request and response to session log history
+        import memory.database as db
+        db.add_chat_message(session_id, "YOU", user_input)
+        db.add_chat_message(session_id, "J.A.R.V.I.S.", result)
+        
+        return result
+
+    def _process_input_core(self, user_input: str, session_id: str) -> str:
+        """Core routing implementation containing fallback logic and tool executing loops."""
+        logger.log(f"Received user input: '{user_input}' (session: {session_id})", category="ROUTER")
         # Shortcut for real-time time/date queries to ensure 100% reliable local responses
         tz_name = user_timezone_var.get()
         try:
@@ -125,10 +136,20 @@ class JarvisRouter:
         for attempt, model in enumerate([self.primary_model] + self.fallback_models):
             try:
                 logger.log(f"Routing query using model {model}...", category="BRAIN")
-                messages = [
-                    {"role": "system", "content": ROUTER_PROMPT},
-                    {"role": "user", "content": user_input}
-                ]
+                import memory.database as db
+                history = db.get_chat_history(session_id, limit=10)
+                
+                messages = [{"role": "system", "content": ROUTER_PROMPT}]
+                for msg in history:
+                    role = msg["role"]
+                    if role == "YOU":
+                        role = "user"
+                    elif role == "J.A.R.V.I.S.":
+                        role = "assistant"
+                    if role in ["user", "assistant", "system"]:
+                        messages.append({"role": role, "content": msg["content"]})
+                        
+                messages.append({"role": "user", "content": user_input})
                 
                 response = self.client.chat.completions.create(
                     model=model,
@@ -224,7 +245,7 @@ class JarvisRouter:
             if agent_name in self.agents:
                 agent = self.agents[agent_name]
                 logger.log(f"Delegating task to the {agent_name} sub-system...", category="ROUTER")
-                res = agent.process_message(user_input)
+                res = agent.process_message(user_input, session_id)
                 logger.log(f"Task completed by {agent_name}.", category="ROUTER")
                 return res
             else:

@@ -80,14 +80,25 @@ class UnifiedBrain:
             })
         return schemas
 
-    def process_message(self, message: str) -> str:
+    def process_message(self, message: str, session_id: str = "default") -> str:
         """
         Sends a message to the primary brain (OpenRouter) with a tool-execution loop.
+        Includes N-turns of session chat history for context.
         """
-        messages = [
-            {"role": "system", "content": self.system_instruction},
-            {"role": "user", "content": message}
-        ]
+        import memory.database as db
+        history = db.get_chat_history(session_id, limit=6)
+        
+        messages = [{"role": "system", "content": self.system_instruction}]
+        for msg in history:
+            role = msg["role"]
+            if role == "YOU":
+                role = "user"
+            elif role == "J.A.R.V.I.S.":
+                role = "assistant"
+            if role in ["user", "assistant", "system"]:
+                messages.append({"role": role, "content": msg["content"]})
+                
+        messages.append({"role": "user", "content": message})
 
         try:
             # Try primary model first, then fallbacks

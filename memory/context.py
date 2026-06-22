@@ -1,19 +1,26 @@
+import memory.database as db
+
 class SystemMemory:
     _instance = None
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SystemMemory, cls).__new__(cls)
-            cls._instance.shared_facts = []
         return cls._instance
     
+    @property
+    def shared_facts(self) -> list:
+        # Expose facts as a list for compatibility with API endpoints
+        return db.get_facts()
+    
     def add_fact(self, fact: str):
-        self.shared_facts.append(fact)
+        db.add_fact(fact)
         
     def get_facts(self) -> str:
-        if not self.shared_facts:
+        facts = db.get_facts()
+        if not facts:
             return "No shared facts available."
-        return "\n".join(self.shared_facts)
+        return "\n".join(facts)
 
 # Global memory instance
 memory_bank = SystemMemory()
