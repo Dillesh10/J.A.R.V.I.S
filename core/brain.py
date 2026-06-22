@@ -14,10 +14,10 @@ class UnifiedBrain:
     A unified interface for both OpenRouter (Cloud-based Free Models) and Gemini.
     JARVIS uses OpenRouter as the primary conversational brain to avoid rate limits.
     """
-    def __init__(self, name: str, system_instruction: str, tools: List[Callable] = None):
+    def __init__(self, name: str, system_instruction: str, tools: List[Any] = None):
         self.name = name
         self.system_instruction = system_instruction
-        self.tools = tools or []
+        self.raw_tools = tools or []
         
         # OpenRouter Setup
         self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
@@ -30,13 +30,43 @@ class UnifiedBrain:
             }
         )
         
+        # Auto-discover tools in tools/ folder
+        from tools.registry import discover_tools, tool_registry
+        discover_tools()
+        
+        self.tool_map = {}
+        self.openai_tools = []
+        gemini_tools = []
+        legacy_tools = []
+        
+        for tool in self.raw_tools:
+            if isinstance(tool, str):
+                try:
+                    tool_obj = tool_registry.get_tool(tool)
+                    self.tool_map[tool_obj.name] = tool_obj
+                    self.openai_tools.append(tool_obj.to_openai_schema())
+                    gemini_tools.append(tool_obj.execute)
+                except Exception as e:
+                    logger.log(f"[{self.name} Brain] Could not load tool '{tool}' from registry: {e}", category="SYSTEM")
+            elif hasattr(tool, "execute") and hasattr(tool, "to_openai_schema"):
+                self.tool_map[tool.name] = tool
+                self.openai_tools.append(tool.to_openai_schema())
+                gemini_tools.append(tool.execute)
+            else:
+                self.tool_map[tool.__name__] = tool
+                legacy_tools.append(tool)
+                gemini_tools.append(tool)
+                
+        if legacy_tools:
+            self.openai_tools.extend(self._convert_legacy_tools_to_openai_schema(legacy_tools))
+            
         # Gemini Setup
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         if self.gemini_key and self.gemini_key != "your_gemini_api_key_here":
             genai.configure(api_key=self.gemini_key)
             self.gemini_model = genai.GenerativeModel(
                 model_name="gemini-1.5-flash",
-                tools=self.tools,
+                tools=gemini_tools,
                 system_instruction=self.system_instruction
             )
             self.gemini_chat = self.gemini_model.start_chat(enable_automatic_function_calling=True)
@@ -50,15 +80,11 @@ class UnifiedBrain:
             "google/gemma-3-27b-it:free",
             "nousresearch/hermes-3-llama-3.1-405b:free"
         ]
-        
-        # Mapping for tool execution
-        self.tool_map = {tool.__name__: tool for tool in self.tools}
-        self.openai_tools = self._convert_tools_to_openai_schema()
 
-    def _convert_tools_to_openai_schema(self) -> List[Dict[str, Any]]:
-        """Converts Python functions to OpenAI JSON Schema format for tool calling."""
+    def _convert_legacy_tools_to_openai_schema(self, legacy_tools: List[Callable]) -> List[Dict[str, Any]]:
+        """Converts legacy Python function tools to OpenAI JSON Schema format."""
         schemas = []
-        for tool in self.tools:
+        for tool in legacy_tools:
             sig = inspect.signature(tool)
             params = {
                 "type": "object",
@@ -147,7 +173,10 @@ class UnifiedBrain:
                                                     args = ast.literal_eval(f"({args_str})")
                                             
                                             logger.log(f"[{self.name} Brain Fallback] Textual execution of tool '{tool_name}' with args: ({args_str})...", category="TOOL")
-                                            tool_result = str(tool_func(*args))
+                                            if hasattr(tool_func, "execute"):
+                                                tool_result = str(tool_func.execute(*args))
+                                            else:
+                                                tool_result = str(tool_func(*args))
                                             logger.log(f"[{self.name} Brain Fallback] Tool '{tool_name}' result: {tool_result[:150]}...", category="TOOL")
                                             messages.append({"role": "user", "content": f"[SYSTEM MESSAGE]: Tool {tool_name} returned:\n{tool_result}\nNow, please answer the user naturally based on this information."})
                                             executed_any_tool = True
@@ -175,7 +204,16 @@ class UnifiedBrain:
                             if function_name in self.tool_map:
                                 logger.log(f"[{self.name} Brain] Executing tool '{function_name}' with args: {function_args}...", category="TOOL")
                                 try:
-                                    tool_result_raw = str(self.tool_map[function_name](**function_args))
+                                    tool_obj = self.tool_map[function_name]
+                                    if hasattr(tool_obj, "execute"):
+                                        validated_args = tool_obj.validate_arguments(function_args)
+                                        if validated_args:
+                                            tool_result_raw = str(tool_obj.execute(**validated_args.model_dump()))
+                                        else:
+                                            tool_result_raw = str(tool_obj.execute())
+                                    else:
+                                        tool_result_raw = str(tool_obj(**function_args))
+                                        
                                     if "missing" in tool_result_raw.lower():
                                         pass
                                     tool_result = f"{tool_result_raw}\n\n[SYSTEM DIRECTIVE]: The tool has successfully executed. You MUST NOW provide your final response to the user based on this result. DO NOT call this same tool again."
