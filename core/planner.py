@@ -626,7 +626,18 @@ class WorkflowEngine:
             if len(layer) == 1:
                 # Single task in layer, run sequentially
                 task_id = layer[0]
-                success = self._execute_single_task(workflow, task_id)
+                try:
+                    success = self._execute_single_task(workflow, task_id)
+                except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                    workflow.status = "FAILED"
+                    db.update_workflow_status(workflow.id, "FAILED")
+                    db.add_timeline_event(workflow.id, task_id, "Workflow Terminated", f"Security violation: {str(se)}")
+                    workflow.tasks[task_id].status = "FAILED"
+                    workflow.tasks[task_id].error_message = str(se)
+                    db.update_workflow_task(task_id, "FAILED", error_message=str(se))
+                    logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[task_id]), category="SYSTEM")
+                    return f"Workflow execution refused due to security policy/requirements, sir.\nDetails: {str(se)}"
+                
                 if not success:
                     workflow.status = "FAILED"
                     db.update_workflow_status(workflow.id, "FAILED")
@@ -640,6 +651,7 @@ class WorkflowEngine:
                     futures = {executor.submit(self._execute_single_task, workflow, t_id): t_id for t_id in layer}
                     layer_success = True
                     failed_task_id = None
+                    security_exc = None
                     for future in concurrent.futures.as_completed(futures):
                         t_id = futures[future]
                         try:
@@ -647,6 +659,11 @@ class WorkflowEngine:
                             if not res:
                                 layer_success = False
                                 failed_task_id = t_id
+                        except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                            layer_success = False
+                            failed_task_id = t_id
+                            security_exc = se
+                            workflow.tasks[t_id].error_message = str(se)
                         except Exception as e:
                             layer_success = False
                             failed_task_id = t_id
@@ -655,9 +672,15 @@ class WorkflowEngine:
                     if not layer_success:
                         workflow.status = "FAILED"
                         db.update_workflow_status(workflow.id, "FAILED")
-                        db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed during parallel task execution.")
-                        logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
-                        return f"Workflow aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
+                        if security_exc:
+                            db.add_timeline_event(workflow.id, failed_task_id, "Workflow Terminated", f"Security violation: {str(security_exc)}")
+                            db.update_workflow_task(failed_task_id, "FAILED", error_message=str(security_exc))
+                            logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
+                            return f"Workflow execution refused due to security policy/requirements, sir.\nDetails: {str(security_exc)}"
+                        else:
+                            db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed during parallel task execution.")
+                            logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
+                            return f"Workflow aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
 
         # Workflow complete
         workflow.status = "COMPLETED"
@@ -670,99 +693,112 @@ class WorkflowEngine:
     def _execute_single_task(self, workflow: Workflow, task_id: str) -> bool:
         """Executes a single task with retries, verification, and failure recovery."""
         import memory.database as db
+        from core.security import active_workflow_id_var, active_task_id_var, ConfirmationRequiredError, PermissionDeniedError
+        
         task = workflow.tasks[task_id]
-        task.status = "RUNNING"
-        db.update_workflow_task(task.id, "RUNNING")
-        db.add_timeline_event(workflow.id, task.id, "Task Started", f"Task '{task.description}' started.")
-        logger.log(self.tracker.format_mission_control(workflow, task), category="SYSTEM")
-
-        max_retries = 3
-        success = False
-        start_time = datetime.datetime.now()
+        token_wf = active_workflow_id_var.set(workflow.id)
+        token_task = active_task_id_var.set(task.id)
         
-        for retry in range(1, max_retries + 1):
-            task.retry_count = retry
-            if retry > 1:
-                db.add_timeline_event(workflow.id, task.id, "Retry", f"Retrying task (Attempt {retry}/{max_retries})...")
-            try:
-                tool_obj = tool_registry.get_tool(task.assigned_tool)
-                logger.log(f"[Planner] Executing tool '{task.assigned_tool}' for task '{task.id}' (Attempt {retry}/{max_retries})...", category="TOOL")
-                
-                validated = tool_obj.validate_arguments(task.args)
-                if validated:
-                    res = str(tool_obj.execute(**validated.model_dump()))
-                else:
-                    res = str(tool_obj.execute())
-                
-                task.actual_result = res
-                
-                # Run verification engine checks
-                if self.verifier.verify(task):
-                    task.status = "COMPLETED"
-                    db.update_workflow_task(task.id, "COMPLETED", actual_result=res, retry_count=retry)
-                    db.add_timeline_event(workflow.id, task.id, "Verification Passed", f"Verification logic satisfied for task '{task.id}'.")
-                    db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' successfully finished.")
-                    success = True
-                    break
-                else:
+        try:
+            task.status = "RUNNING"
+            db.update_workflow_task(task.id, "RUNNING")
+            db.add_timeline_event(workflow.id, task.id, "Task Started", f"Task '{task.description}' started.")
+            logger.log(self.tracker.format_mission_control(workflow, task), category="SYSTEM")
+
+            max_retries = 3
+            success = False
+            start_time = datetime.datetime.now()
+            
+            for retry in range(1, max_retries + 1):
+                task.retry_count = retry
+                if retry > 1:
+                    db.add_timeline_event(workflow.id, task.id, "Retry", f"Retrying task (Attempt {retry}/{max_retries})...")
+                try:
+                    tool_obj = tool_registry.get_tool(task.assigned_tool)
+                    logger.log(f"[Planner] Executing tool '{task.assigned_tool}' for task '{task.id}' (Attempt {retry}/{max_retries})...", category="TOOL")
+                    
+                    validated = tool_obj.validate_arguments(task.args)
+                    if validated:
+                        res = str(tool_obj.execute(**validated.model_dump()))
+                    else:
+                        res = str(tool_obj.execute())
+                    
+                    task.actual_result = res
+                    
+                    # Run verification engine checks
+                    if self.verifier.verify(task):
+                        task.status = "COMPLETED"
+                        db.update_workflow_task(task.id, "COMPLETED", actual_result=res, retry_count=retry)
+                        db.add_timeline_event(workflow.id, task.id, "Verification Passed", f"Verification logic satisfied for task '{task.id}'.")
+                        db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' successfully finished.")
+                        success = True
+                        break
+                    else:
+                        task.status = "FAILED"
+                        task.error_message = "Verification check failed."
+                        db.update_workflow_task(task.id, "FAILED", actual_result=res, error_message=task.error_message, retry_count=retry)
+                        db.add_timeline_event(workflow.id, task.id, "Verification Failed", f"Verification returned failure for task '{task.id}'.")
+                except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                    raise se
+                except Exception as e:
                     task.status = "FAILED"
-                    task.error_message = "Verification check failed."
-                    db.update_workflow_task(task.id, "FAILED", actual_result=res, error_message=task.error_message, retry_count=retry)
-                    db.add_timeline_event(workflow.id, task.id, "Verification Failed", f"Verification returned failure for task '{task.id}'.")
-            except Exception as e:
-                task.status = "FAILED"
-                task.error_message = str(e)
-                db.update_workflow_task(task.id, "FAILED", error_message=task.error_message, retry_count=retry)
-                db.add_timeline_event(workflow.id, task.id, "Task Failed", f"Task execution error: {str(e)}")
+                    task.error_message = str(e)
+                    db.update_workflow_task(task.id, "FAILED", error_message=task.error_message, retry_count=retry)
+                    db.add_timeline_event(workflow.id, task.id, "Task Failed", f"Task execution error: {str(e)}")
 
-        end_time = datetime.datetime.now()
-        elapsed = (end_time - start_time).total_seconds()
-        
-        # Log structured execution details
-        severity = "INFO" if success else "ERROR"
-        self.log_structured_entry(
-            workflow_id=workflow.id,
-            task_id=task.id,
-            agent=task.assigned_agent,
-            tool=task.assigned_tool,
-            execution_time=elapsed,
-            status=task.status,
-            severity=severity,
-            error=task.error_message or ""
-        )
+            end_time = datetime.datetime.now()
+            elapsed = (end_time - start_time).total_seconds()
+            
+            # Log structured execution details
+            severity = "INFO" if success else "ERROR"
+            self.log_structured_entry(
+                workflow_id=workflow.id,
+                task_id=task.id,
+                agent=task.assigned_agent,
+                tool=task.assigned_tool,
+                execution_time=elapsed,
+                status=task.status,
+                severity=severity,
+                error=task.error_message or ""
+            )
 
-        # Failure Recovery Integration
-        if not success:
-            recovered_task = self.recovery_agent.attempt_recovery(workflow, task)
-            if recovered_task:
-                if recovered_task.status == "SKIPPED":
-                    task.status = "SKIPPED"
-                    db.update_workflow_task(task.id, "SKIPPED", error_message=task.error_message)
-                    db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' was skipped per recovery suggestion.")
-                    return True
-                else:
-                    task.assigned_tool = recovered_task.assigned_tool
-                    task.assigned_agent = recovered_task.assigned_agent
-                    task.args = recovered_task.args
-                    task.status = "RUNNING"
-                    db.update_workflow_task(task.id, "RUNNING", retry_count=0)
-                    try:
-                        tool_obj = tool_registry.get_tool(task.assigned_tool)
-                        validated = tool_obj.validate_arguments(task.args)
-                        if validated:
-                            res = str(tool_obj.execute(**validated.model_dump()))
-                        else:
-                            res = str(tool_obj.execute())
-                        task.actual_result = res
-                        if self.verifier.verify(task):
-                            task.status = "COMPLETED"
-                            db.update_workflow_task(task.id, "COMPLETED", actual_result=res)
-                            db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task successfully completed after recovery tool substitution.")
-                            return True
-                    except Exception as e:
-                        task.error_message = str(e)
+            # Failure Recovery Integration
+            if not success:
+                recovered_task = self.recovery_agent.attempt_recovery(workflow, task)
+                if recovered_task:
+                    if recovered_task.status == "SKIPPED":
+                        task.status = "SKIPPED"
+                        db.update_workflow_task(task.id, "SKIPPED", error_message=task.error_message)
+                        db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' was skipped per recovery suggestion.")
+                        return True
+                    else:
+                        task.assigned_tool = recovered_task.assigned_tool
+                        task.assigned_agent = recovered_task.assigned_agent
+                        task.args = recovered_task.args
+                        task.status = "RUNNING"
+                        db.update_workflow_task(task.id, "RUNNING", retry_count=0)
+                        try:
+                            tool_obj = tool_registry.get_tool(task.assigned_tool)
+                            validated = tool_obj.validate_arguments(task.args)
+                            if validated:
+                                res = str(tool_obj.execute(**validated.model_dump()))
+                            else:
+                                res = str(tool_obj.execute())
+                            task.actual_result = res
+                            if self.verifier.verify(task):
+                                task.status = "COMPLETED"
+                                db.update_workflow_task(task.id, "COMPLETED", actual_result=res)
+                                db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task successfully completed after recovery tool substitution.")
+                                return True
+                        except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                            raise se
+                        except Exception as e:
+                            task.error_message = str(e)
 
-        return success
+            return success
+        finally:
+            active_workflow_id_var.reset(token_wf)
+            active_task_id_var.reset(token_task)
 
     def resume_workflow(self, workflow_id: str) -> str:
         """Resumes a previously failed or interrupted workflow starting from the first non-completed task."""
@@ -827,7 +863,18 @@ class WorkflowEngine:
                 
             if len(layer_todo) == 1:
                 task_id = layer_todo[0]
-                success = self._execute_single_task(workflow, task_id)
+                try:
+                    success = self._execute_single_task(workflow, task_id)
+                except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                    workflow.status = "FAILED"
+                    db.update_workflow_status(workflow.id, "FAILED")
+                    db.add_timeline_event(workflow.id, task_id, "Workflow Terminated", f"Security violation: {str(se)}")
+                    workflow.tasks[task_id].status = "FAILED"
+                    workflow.tasks[task_id].error_message = str(se)
+                    db.update_workflow_task(task_id, "FAILED", error_message=str(se))
+                    logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[task_id]), category="SYSTEM")
+                    return f"Workflow resume aborted due to security requirements, sir.\nDetails: {str(se)}"
+                
                 if not success:
                     workflow.status = "FAILED"
                     db.update_workflow_status(workflow.id, "FAILED")
@@ -840,6 +887,7 @@ class WorkflowEngine:
                     futures = {executor.submit(self._execute_single_task, workflow, t_id): t_id for t_id in layer_todo}
                     layer_success = True
                     failed_task_id = None
+                    security_exc = None
                     for future in concurrent.futures.as_completed(futures):
                         t_id = futures[future]
                         try:
@@ -847,6 +895,11 @@ class WorkflowEngine:
                             if not res:
                                 layer_success = False
                                 failed_task_id = t_id
+                        except (ConfirmationRequiredError, PermissionDeniedError) as se:
+                            layer_success = False
+                            failed_task_id = t_id
+                            security_exc = se
+                            workflow.tasks[t_id].error_message = str(se)
                         except Exception as e:
                             layer_success = False
                             failed_task_id = t_id
@@ -855,9 +908,15 @@ class WorkflowEngine:
                     if not layer_success:
                         workflow.status = "FAILED"
                         db.update_workflow_status(workflow.id, "FAILED")
-                        db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed on parallel resumed task.")
-                        logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
-                        return f"Workflow resume aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
+                        if security_exc:
+                            db.add_timeline_event(workflow.id, failed_task_id, "Workflow Terminated", f"Security violation: {str(security_exc)}")
+                            db.update_workflow_task(failed_task_id, "FAILED", error_message=str(security_exc))
+                            logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
+                            return f"Workflow resume aborted due to security requirements, sir.\nDetails: {str(security_exc)}"
+                        else:
+                            db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed on parallel resumed task.")
+                            logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
+                            return f"Workflow resume aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
 
         # Workflow complete
         workflow.status = "COMPLETED"

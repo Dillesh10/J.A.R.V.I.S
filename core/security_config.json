@@ -1,0 +1,65 @@
+{
+  "developer_mode": false,
+  "protected_folders": [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+    "C:\\Users\\Administrator",
+    "C:\\Windows\\System32",
+    "C:\\ProgramData",
+    "E:\\System Volume Information"
+  ],
+  "protected_files": [
+    "id_rsa",
+    "id_dsa",
+    "credentials",
+    "config",
+    "jarvis_memory.db"
+  ],
+  "dangerous_commands": [
+    "rm\\s+-rf",
+    "del\\s+/f\\s+/s",
+    "shutdown\\s+-[sr]",
+    "format\\s+[a-zA-Z]:",
+    "diskpart",
+    "reg\\s+delete",
+    "taskkill\\s+/f\\s+/im\\s+(svchost|lsass|csrss|wininit|services)\\.exe",
+    "Set-ExecutionPolicy\\s+(Bypass|Unrestricted)"
+  ],
+  "tool_risks": {
+    "read_file": "LOW",
+    "launch_url": "LOW",
+    "web_search": "LOW",
+    "list_processes": "LOW",
+    "clipboard_read": "LOW",
+    "take_screenshot": "LOW",
+    "get_system_info": "LOW",
+    "get_current_datetime": "LOW",
+    "store_fact": "LOW",
+    "recall_facts": "LOW",
+    "browser_get_page_text": "LOW",
+    "create_folder": "MEDIUM",
+    "rename_file": "MEDIUM",
+    "write_file": "MEDIUM",
+    "append_file": "MEDIUM",
+    "open_application": "MEDIUM",
+    "clipboard_write": "MEDIUM",
+    "browser_navigate": "MEDIUM",
+    "browser_click": "MEDIUM",
+    "browser_type_text": "MEDIUM",
+    "browser_press_key": "MEDIUM",
+    "browser_close": "MEDIUM",
+    "delete_file": "HIGH",
+    "delete_folder": "HIGH",
+    "kill_process": "HIGH",
+    "execute_command": "HIGH",
+    "manage_background_process": "HIGH"
+  },
+  "policies": {
+    "LOW": "ALLOW",
+    "MEDIUM": "REQUIRE_CONFIRMATION",
+    "HIGH": "REQUIRE_CONFIRMATION",
+    "CRITICAL": "REQUIRE_CONFIRMATION"
+  },
+  "approval_timeout_seconds": 300
+}

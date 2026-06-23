@@ -98,6 +98,36 @@ def init_db():
                 error TEXT
             )
         """)
+        # Create security audit log table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS security_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                workflow_id TEXT,
+                task_id TEXT,
+                agent TEXT,
+                tool TEXT,
+                risk_level TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                approval_id TEXT,
+                execution_status TEXT,
+                user_name TEXT
+            )
+        """)
+        # Create approval tokens table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS approval_tokens (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                user_name TEXT,
+                reason TEXT
+            )
+        """)
         conn.commit()
     # Run safe column migrations
     migrate_db()
@@ -347,4 +377,81 @@ def get_planner_metrics() -> dict:
             "retry_rate": float(retry_rate),
             "verification_success_rate": float(verification_success_rate),
             "total_workflows": total_wf
+        }
+
+# Security Helpers
+def add_security_audit_log(workflow_id: Optional[str], task_id: Optional[str], agent: str, tool: str, risk_level: str, decision: str, approval_id: Optional[str], execution_status: str, user_name: str):
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO security_audit_log 
+               (workflow_id, task_id, agent, tool, risk_level, decision, approval_id, execution_status, user_name) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (workflow_id, task_id, agent, tool, risk_level, decision, approval_id, execution_status, user_name)
+        )
+        conn.commit()
+
+def get_security_audit_logs(workflow_id: Optional[str] = None) -> list:
+    with get_connection() as conn:
+        if workflow_id:
+            rows = conn.execute("SELECT * FROM security_audit_log WHERE workflow_id = ? ORDER BY id ASC", (workflow_id,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM security_audit_log ORDER BY id DESC").fetchall()
+        return [dict(row) for row in rows]
+
+def add_approval_token(token_id: str, workflow_id: str, task_id: str, risk_level: str, status: str, expires_at: str, user_name: str, reason: str):
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO approval_tokens 
+               (id, workflow_id, task_id, risk_level, status, expires_at, user_name, reason) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (token_id, workflow_id, task_id, risk_level, status, expires_at, user_name, reason)
+        )
+        conn.commit()
+
+def get_approval_token(token_id: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM approval_tokens WHERE id = ?", (token_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_active_approval_token(workflow_id: str, task_id: str) -> Optional[dict]:
+    with get_connection() as conn:
+        # Get latest active token for this workflow/task
+        row = conn.execute(
+            """SELECT * FROM approval_tokens 
+               WHERE workflow_id = ? AND task_id = ? AND status = 'APPROVED'
+               ORDER BY created_at DESC LIMIT 1""", 
+            (workflow_id, task_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def update_approval_token_status(token_id: str, status: str):
+    with get_connection() as conn:
+        conn.execute("UPDATE approval_tokens SET status = ? WHERE id = ?", (status, token_id))
+        conn.commit()
+
+def get_security_metrics() -> dict:
+    with get_connection() as conn:
+        # Total and specific token stats
+        total_tokens = conn.execute("SELECT COUNT(*) as cnt FROM approval_tokens").fetchone()["cnt"]
+        approved_tokens = conn.execute("SELECT COUNT(*) as cnt FROM approval_tokens WHERE status = 'APPROVED'").fetchone()["cnt"]
+        denied_tokens = conn.execute("SELECT COUNT(*) as cnt FROM approval_tokens WHERE status = 'DENIED'").fetchone()["cnt"]
+        
+        approval_rate = (approved_tokens / total_tokens * 100) if total_tokens > 0 else 100.0
+        denial_rate = (denied_tokens / total_tokens * 100) if total_tokens > 0 else 0.0
+
+        # Critical actions and checks
+        critical_actions = conn.execute("SELECT COUNT(*) as cnt FROM security_audit_log WHERE risk_level = 'CRITICAL' AND decision = 'ALLOWED'").fetchone()["cnt"]
+        blocked_commands = conn.execute("SELECT COUNT(*) as cnt FROM security_audit_log WHERE decision = 'DENIED'").fetchone()["cnt"]
+        failed_checks = conn.execute("SELECT COUNT(*) as cnt FROM security_audit_log WHERE execution_status = 'BLOCKED'").fetchone()["cnt"]
+        
+        # Cancelled workflows
+        cancelled_wfs = conn.execute("SELECT COUNT(*) as cnt FROM workflows WHERE status = 'CANCELLED'").fetchone()["cnt"]
+
+        return {
+            "approval_rate": float(approval_rate),
+            "denial_rate": float(denial_rate),
+            "critical_actions_executed": int(critical_actions),
+            "blocked_commands_count": int(blocked_commands),
+            "failed_security_checks_count": int(failed_checks),
+            "cancelled_workflows_count": int(cancelled_wfs)
         }

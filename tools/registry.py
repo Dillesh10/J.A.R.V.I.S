@@ -13,6 +13,28 @@ class ToolRegistry:
 
     def register(self, tool: BaseTool):
         """Registers a BaseTool instance."""
+        original_execute = tool.execute
+
+        def secure_execute(*args, **kwargs):
+            from core.security import permission_engine
+            # Map positional arguments to schema field names if applicable
+            args_dict = {}
+            if kwargs:
+                args_dict.update(kwargs)
+            if args and tool.args_schema:
+                schema_fields = list(tool.args_schema.model_fields.keys())
+                for idx, val in enumerate(args):
+                    if idx < len(schema_fields):
+                        args_dict[schema_fields[idx]] = val
+            else:
+                # Fallback for simple args
+                for idx, val in enumerate(args):
+                    args_dict[f"arg_{idx}"] = val
+
+            permission_engine.check_tool_permission(tool.name, args_dict)
+            return original_execute(*args, **kwargs)
+
+        tool.execute = secure_execute
         self._tools[tool.name] = tool
         logger.log(f"Registered tool: '{tool.name}'", category="SYSTEM")
 
