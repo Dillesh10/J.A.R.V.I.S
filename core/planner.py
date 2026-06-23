@@ -26,14 +26,50 @@ class Task(BaseModel):
     actual_result: Optional[str] = Field(default=None, description="Collected tool execution result.")
     error_message: Optional[str] = Field(default=None, description="Error details if task execution failed.")
     verification_rule: Optional[str] = Field(default=None, description="Rule to verify success (e.g. 'file_exists', 'directory_exists', 'process_running', 'exit_code_zero').")
+    
+    # Future Cost Tracking Hooks (optional placeholders)
+    provider: Optional[str] = Field(default=None)
+    model: Optional[str] = Field(default=None)
+    token_usage: Optional[Dict[str, int]] = Field(default=None)
+    estimated_cost: Optional[float] = Field(default=None)
+    latency: Optional[float] = Field(default=None)
+    api_calls: Optional[int] = Field(default=None)
 
 class Workflow(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8], description="Sequential workflow ID (e.g. 'WF-000001').")
     goal: str
     status: str = Field(default="PENDING")
     tasks: Dict[str, Task] = Field(default_factory=dict)
     created_at: str = Field(default_factory=lambda: datetime.datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.datetime.now().isoformat())
+    
+    # Refinement Fields
+    confidence_score: Optional[int] = Field(default=None)
+    confidence_reason: Optional[str] = Field(default=None)
+    provider: Optional[str] = Field(default=None)
+    model: Optional[str] = Field(default=None)
+    token_usage: Optional[Dict[str, int]] = Field(default=None)
+    estimated_cost: Optional[float] = Field(default=None)
+    latency: Optional[float] = Field(default=None)
+    api_calls: Optional[int] = Field(default=None)
+
+class MissionControlState(BaseModel):
+    workflow_id: str
+    workflow_name: str
+    status: str
+    progress_pct: int
+    running_tasks: List[str] = []
+    completed_tasks: List[str] = []
+    failed_tasks: List[str] = []
+    current_agent: str = "None"
+    current_tool: str = "None"
+    start_time: str
+    end_time: Optional[str] = None
+    elapsed_time: float = 0.0
+    estimated_remaining_time: float = 0.0
+    current_stage: str = "Decomposing"
+    retry_count: int = 0
+    last_error: Optional[str] = None
 
 # ─── INTENT & GOAL ANALYZER ──────────────────────────────────────────────────
 
@@ -117,6 +153,49 @@ class GoalAnalyzer:
             "expected_outputs": [],
             "risk_level": "Low"
         }
+
+# ─── CONFIDENCE ENGINE ────────────────────────────────────────────────────────
+
+class ConfidenceEngine:
+    def __init__(self, brain: UnifiedBrain):
+        self.brain = brain
+
+    def calculate_confidence(self, goal: str) -> Dict[str, Any]:
+        """Calculates confidence score (0-100) and reasoning for satisfying the goal."""
+        tools = tool_registry.list_tools()
+        tools_info = [t.name for t in tools]
+        prompt = f"""
+        You are J.A.R.V.I.S. X's Planner Confidence Engine.
+        Evaluate the goal: "{goal}"
+        Registered tools available to the system: {tools_info}
+
+        Determine:
+        1. Confidence score (0 to 100) that we have the necessary tools and agents to satisfy this request.
+        2. The reasoning behind the score.
+
+        Respond ONLY in the following JSON format:
+        {{
+            "confidence": 95,
+            "reason": "High confidence because we have tools for directory creation, file creation, command execution, and git commands."
+        }}
+        """
+        try:
+            res = self.brain.process_message(prompt, session_id="planner_internal")
+            match = re.search(r"\{.*\}", res, re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                data["confidence"] = int(data["confidence"])
+                return data
+        except Exception as e:
+            logger.log(f"[Planner] Confidence calculation failed: {e}", category="SYSTEM")
+        
+        # Fallback confidence heuristic
+        score = 90
+        reason = "Default high confidence estimation."
+        lower_goal = goal.lower()
+        if "react" in lower_goal or "deploy" in lower_goal:
+            score = 85
+        return {"confidence": score, "reason": reason}
 
 # ─── TASK DECOMPOSER ─────────────────────────────────────────────────────────
 
@@ -377,6 +456,7 @@ class ProgressTracker:
         output = f"""
 ================ MISSION CONTROL ================
 Goal: {workflow.goal}
+Workflow ID: {workflow.id}
 Status: {workflow.status}
 Progress: {pct}% ({completed}/{total} Tasks Completed)
 Current Agent: {current_agent}
@@ -409,6 +489,9 @@ class FailureRecovery:
         agent, or alternative arguments. Returns a new Task candidate if recovery
         is possible, or None if the workflow must be aborted.
         """
+        import memory.database as db
+        db.add_timeline_event(workflow.id, failed_task.id, "Retry", f"Task {failed_task.id} failed, analyzing recovery options...")
+        
         prompt = f"""
         A task in the workflow has failed.
         Workflow Goal: "{workflow.goal}"
@@ -463,6 +546,7 @@ class WorkflowEngine:
         self.brain = brain
         self.intent_analyzer = IntentAnalyzer(brain)
         self.goal_analyzer = GoalAnalyzer(brain)
+        self.confidence_engine = ConfidenceEngine(brain)
         self.decomposer = TaskDecomposer(brain)
         self.verifier = VerificationEngine()
         self.tracker = ProgressTracker()
@@ -471,6 +555,20 @@ class WorkflowEngine:
     def run_workflow(self, goal: str) -> str:
         """Fully plans, schedules, runs, and monitors a multi-step workflow."""
         logger.log(f"[Planner] Starting planner engine for goal: '{goal}'", category="SYSTEM")
+        
+        # Calculate Confidence score
+        confidence_info = self.confidence_engine.calculate_confidence(goal)
+        score = confidence_info.get("confidence", 90)
+        reason = confidence_info.get("reason", "Default confidence score.")
+        
+        if score < 70:
+            return f"I require clarification, sir. My confidence in planning this goal is low ({score}%) because: {reason}. Could you please refine your request?"
+
+        # Generate sequential, zero-padded Workflow ID
+        import memory.database as db
+        all_wf = db.get_all_workflows()
+        next_seq = len(all_wf) + 1
+        workflow_id = f"WF-{next_seq:06d}"
         
         # Analyze goal
         goal_info = self.goal_analyzer.analyze_goal(goal)
@@ -482,7 +580,12 @@ class WorkflowEngine:
             return f"I planned a workflow for '{goal}', but I was unable to break it into valid tasks. Please clarify your request, sir."
 
         # Setup workflow
-        workflow = Workflow(goal=goal)
+        workflow = Workflow(
+            id=workflow_id,
+            goal=goal,
+            confidence_score=score,
+            confidence_reason=reason
+        )
         for t in tasks:
             workflow.tasks[t.id] = t
         
@@ -490,8 +593,15 @@ class WorkflowEngine:
         graph = TaskGraph(tasks)
         
         # Database creation
-        import memory.database as db
-        db.create_workflow(workflow.id, workflow.goal, "RUNNING")
+        db.create_workflow(
+            workflow_id=workflow.id,
+            goal=workflow.goal,
+            status="RUNNING",
+            confidence_score=score,
+            confidence_reason=reason
+        )
+        db.add_timeline_event(workflow.id, None, "Workflow Started", f"Workflow {workflow.id} successfully created and scheduler started.")
+        
         for t in workflow.tasks.values():
             db.add_workflow_task(
                 task_id=t.id,
@@ -503,7 +613,8 @@ class WorkflowEngine:
                 assigned_tool=t.assigned_tool,
                 args=json.dumps(t.args),
                 status=t.status,
-                expected_result=t.expected_result or ""
+                expected_result=t.expected_result or "",
+                verification_rule=t.verification_rule
             )
 
         workflow.status = "RUNNING"
@@ -519,6 +630,7 @@ class WorkflowEngine:
                 if not success:
                     workflow.status = "FAILED"
                     db.update_workflow_status(workflow.id, "FAILED")
+                    db.add_timeline_event(workflow.id, task_id, "Workflow Finished", "Workflow failed due to critical task failure.")
                     logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[task_id]), category="SYSTEM")
                     return f"Workflow aborted, sir. Task '{workflow.tasks[task_id].description}' failed. Error: {workflow.tasks[task_id].error_message}"
             else:
@@ -543,12 +655,14 @@ class WorkflowEngine:
                     if not layer_success:
                         workflow.status = "FAILED"
                         db.update_workflow_status(workflow.id, "FAILED")
+                        db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed during parallel task execution.")
                         logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
                         return f"Workflow aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
 
         # Workflow complete
         workflow.status = "COMPLETED"
         db.update_workflow_status(workflow.id, "COMPLETED")
+        db.add_timeline_event(workflow.id, None, "Workflow Finished", f"Workflow {workflow.id} completed successfully.")
         logger.log(self.tracker.format_mission_control(workflow), category="SYSTEM")
         
         return f"Mission complete, sir. I have successfully accomplished the goal: '{goal}'."
@@ -559,13 +673,17 @@ class WorkflowEngine:
         task = workflow.tasks[task_id]
         task.status = "RUNNING"
         db.update_workflow_task(task.id, "RUNNING")
+        db.add_timeline_event(workflow.id, task.id, "Task Started", f"Task '{task.description}' started.")
         logger.log(self.tracker.format_mission_control(workflow, task), category="SYSTEM")
 
         max_retries = 3
         success = False
+        start_time = datetime.datetime.now()
         
         for retry in range(1, max_retries + 1):
             task.retry_count = retry
+            if retry > 1:
+                db.add_timeline_event(workflow.id, task.id, "Retry", f"Retrying task (Attempt {retry}/{max_retries})...")
             try:
                 tool_obj = tool_registry.get_tool(task.assigned_tool)
                 logger.log(f"[Planner] Executing tool '{task.assigned_tool}' for task '{task.id}' (Attempt {retry}/{max_retries})...", category="TOOL")
@@ -578,19 +696,40 @@ class WorkflowEngine:
                 
                 task.actual_result = res
                 
+                # Run verification engine checks
                 if self.verifier.verify(task):
                     task.status = "COMPLETED"
                     db.update_workflow_task(task.id, "COMPLETED", actual_result=res, retry_count=retry)
+                    db.add_timeline_event(workflow.id, task.id, "Verification Passed", f"Verification logic satisfied for task '{task.id}'.")
+                    db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' successfully finished.")
                     success = True
                     break
                 else:
                     task.status = "FAILED"
                     task.error_message = "Verification check failed."
                     db.update_workflow_task(task.id, "FAILED", actual_result=res, error_message=task.error_message, retry_count=retry)
+                    db.add_timeline_event(workflow.id, task.id, "Verification Failed", f"Verification returned failure for task '{task.id}'.")
             except Exception as e:
                 task.status = "FAILED"
                 task.error_message = str(e)
                 db.update_workflow_task(task.id, "FAILED", error_message=task.error_message, retry_count=retry)
+                db.add_timeline_event(workflow.id, task.id, "Task Failed", f"Task execution error: {str(e)}")
+
+        end_time = datetime.datetime.now()
+        elapsed = (end_time - start_time).total_seconds()
+        
+        # Log structured execution details
+        severity = "INFO" if success else "ERROR"
+        self.log_structured_entry(
+            workflow_id=workflow.id,
+            task_id=task.id,
+            agent=task.assigned_agent,
+            tool=task.assigned_tool,
+            execution_time=elapsed,
+            status=task.status,
+            severity=severity,
+            error=task.error_message or ""
+        )
 
         # Failure Recovery Integration
         if not success:
@@ -599,6 +738,7 @@ class WorkflowEngine:
                 if recovered_task.status == "SKIPPED":
                     task.status = "SKIPPED"
                     db.update_workflow_task(task.id, "SKIPPED", error_message=task.error_message)
+                    db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task '{task.description}' was skipped per recovery suggestion.")
                     return True
                 else:
                     task.assigned_tool = recovered_task.assigned_tool
@@ -617,6 +757,7 @@ class WorkflowEngine:
                         if self.verifier.verify(task):
                             task.status = "COMPLETED"
                             db.update_workflow_task(task.id, "COMPLETED", actual_result=res)
+                            db.add_timeline_event(workflow.id, task.id, "Task Completed", f"Task successfully completed after recovery tool substitution.")
                             return True
                     except Exception as e:
                         task.error_message = str(e)
@@ -631,12 +772,19 @@ class WorkflowEngine:
             return f"Workflow {workflow_id} not found."
             
         logger.log(f"[Planner] Resuming workflow {workflow_id}: '{wf_data['goal']}'", category="SYSTEM")
+        db.add_timeline_event(workflow_id, None, "Workflow Started", "Resuming interrupted workflow state.")
         
         db_tasks = db.get_workflow_tasks(workflow_id)
         if not db_tasks:
             return "No tasks found for this workflow."
             
-        workflow = Workflow(id=workflow_id, goal=wf_data["goal"], status="RUNNING")
+        workflow = Workflow(
+            id=workflow_id,
+            goal=wf_data["goal"],
+            status="RUNNING",
+            confidence_score=wf_data.get("confidence_score"),
+            confidence_reason=wf_data.get("confidence_reason")
+        )
         tasks = []
         for dt in db_tasks:
             try:
@@ -660,7 +808,8 @@ class WorkflowEngine:
                 retry_count=dt["retry_count"],
                 expected_result=dt["expected_result"],
                 actual_result=dt["actual_result"],
-                error_message=dt["error_message"]
+                error_message=dt["error_message"],
+                verification_rule=dt.get("verification_rule")
             )
             workflow.tasks[task.id] = task
             tasks.append(task)
@@ -672,7 +821,6 @@ class WorkflowEngine:
         logger.log(self.tracker.format_mission_control(workflow), category="SYSTEM")
         
         for layer in layers:
-            # Check if all tasks in this layer are completed or skipped
             layer_todo = [t_id for t_id in layer if workflow.tasks[t_id].status not in ["COMPLETED", "SKIPPED"]]
             if not layer_todo:
                 continue
@@ -683,6 +831,7 @@ class WorkflowEngine:
                 if not success:
                     workflow.status = "FAILED"
                     db.update_workflow_status(workflow.id, "FAILED")
+                    db.add_timeline_event(workflow.id, task_id, "Workflow Finished", "Workflow failed on resumed task.")
                     logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[task_id]), category="SYSTEM")
                     return f"Workflow resume aborted, sir. Task '{workflow.tasks[task_id].description}' failed. Error: {workflow.tasks[task_id].error_message}"
             else:
@@ -706,11 +855,190 @@ class WorkflowEngine:
                     if not layer_success:
                         workflow.status = "FAILED"
                         db.update_workflow_status(workflow.id, "FAILED")
+                        db.add_timeline_event(workflow.id, failed_task_id, "Workflow Finished", "Workflow failed on parallel resumed task.")
                         logger.log(self.tracker.format_mission_control(workflow, workflow.tasks[failed_task_id]), category="SYSTEM")
                         return f"Workflow resume aborted during parallel execution, sir. Task '{workflow.tasks[failed_task_id].description}' failed."
 
         # Workflow complete
         workflow.status = "COMPLETED"
         db.update_workflow_status(workflow.id, "COMPLETED")
+        db.add_timeline_event(workflow.id, None, "Workflow Finished", "Resumed workflow successfully completed.")
         logger.log(self.tracker.format_mission_control(workflow), category="SYSTEM")
         return f"Workflow resumed and successfully completed, sir."
+
+    def replay_workflow(self, workflow_id: str) -> List[Dict[str, Any]]:
+        """Retrieves chronological timeline events for playback/replay."""
+        import memory.database as db
+        return db.get_timeline(workflow_id)
+
+    def log_structured_entry(self, workflow_id: str, task_id: Optional[str], agent: str, tool: str, execution_time: float, status: str, severity: str, error: str = ""):
+        """Stores execution statistics in database and workspace JSONL files."""
+        import memory.database as db
+        db.add_structured_log(workflow_id, task_id, agent, tool, execution_time, status, severity, error)
+        
+        log_entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "workflow_id": workflow_id,
+            "task_id": task_id,
+            "agent": agent,
+            "tool": tool,
+            "execution_time": execution_time,
+            "status": status,
+            "severity": severity,
+            "error": error
+        }
+        try:
+            log_dir = os.path.dirname(os.path.abspath(__file__))
+            workspace_root = os.path.dirname(log_dir)
+            log_path = os.path.join(workspace_root, "workflow_logs.jsonl")
+            with open(log_path, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            logger.log(f"[Planner Logs] Failed to write to JSONL file: {e}", category="SYSTEM")
+
+    def get_mission_control_state(self, workflow_id: str) -> Optional[MissionControlState]:
+        """Exposes structured execution metrics for the given workflow."""
+        import memory.database as db
+        wf_data = db.get_workflow(workflow_id)
+        if not wf_data:
+            return None
+            
+        db_tasks = db.get_workflow_tasks(workflow_id)
+        running_tasks = [t["description"] for t in db_tasks if t["status"] == "RUNNING"]
+        completed_tasks = [t["description"] for t in db_tasks if t["status"] == "COMPLETED"]
+        failed_tasks = [t["description"] for t in db_tasks if t["status"] == "FAILED"]
+        
+        total = len(db_tasks)
+        completed_cnt = len(completed_tasks)
+        pct = int((completed_cnt / total) * 100) if total > 0 else 0
+        
+        current_task = None
+        for t in db_tasks:
+            if t["status"] == "RUNNING":
+                current_task = t
+                break
+                
+        current_agent = current_task["assigned_agent"] if current_task else "None"
+        current_tool = current_task["assigned_tool"] if current_task else "None"
+        
+        start_dt = datetime.datetime.fromisoformat(wf_data["created_at"])
+        if wf_data["status"] in ["COMPLETED", "FAILED"]:
+            end_dt = datetime.datetime.fromisoformat(wf_data["updated_at"])
+            elapsed = (end_dt - start_dt).total_seconds()
+            end_time_str = wf_data["updated_at"]
+        else:
+            elapsed = (datetime.datetime.now() - start_dt).total_seconds()
+            end_time_str = None
+            
+        running_or_pending = sum(1 for t in db_tasks if t["status"] in ["PENDING", "RUNNING"])
+        est_remaining = running_or_pending * 10.0 if wf_data["status"] == "RUNNING" else 0.0
+        
+        if wf_data["status"] == "PENDING":
+            stage = "Planning"
+        elif wf_data["status"] == "RUNNING":
+            stage = "Executing"
+        else:
+            stage = "Finished"
+            
+        retries = sum(t["retry_count"] for t in db_tasks)
+        last_err_list = [t["error_message"] for t in db_tasks if t["error_message"]]
+        last_err = last_err_list[-1] if last_err_list else None
+        
+        return MissionControlState(
+            workflow_id=workflow_id,
+            workflow_name=wf_data["goal"],
+            status=wf_data["status"],
+            progress_pct=pct,
+            running_tasks=running_tasks,
+            completed_tasks=completed_tasks,
+            failed_tasks=failed_tasks,
+            current_agent=current_agent,
+            current_tool=current_tool,
+            start_time=wf_data["created_at"],
+            end_time=end_time_str,
+            elapsed_time=round(elapsed, 2),
+            estimated_remaining_time=round(est_remaining, 2),
+            current_stage=stage,
+            retry_count=retries,
+            last_error=last_err
+        )
+
+    def get_workflow_tree_text(self, workflow_id: str) -> str:
+        """Generates tree text structure for workflow tasks."""
+        import memory.database as db
+        tasks = db.get_workflow_tasks(workflow_id)
+        if not tasks:
+            return "No tasks found for workflow."
+            
+        task_map = {t["id"]: t for t in tasks}
+        children = {t["id"]: [] for t in tasks}
+        roots = []
+        
+        for t in tasks:
+            try:
+                deps = json.loads(t["dependencies"])
+            except Exception:
+                deps = []
+            if not deps:
+                roots.append(t["id"])
+            else:
+                for dep in deps:
+                    if dep in children:
+                        children[dep].append(t["id"])
+                        
+        lines = ["Workflow Tree:"]
+        def _render_node(node_id, prefix=""):
+            task = task_map[node_id]
+            lines.append(f"{prefix}└── {task['description']} [{task['status']}]")
+            node_children = children.get(node_id, [])
+            for child in node_children:
+                _render_node(child, prefix + "    ")
+                
+        for root in roots:
+            _render_node(root)
+            
+        return "\n".join(lines)
+
+    def get_workflow_tree_json(self, workflow_id: str) -> Dict[str, Any]:
+        """Generates visual JSON structure for tree visualizations."""
+        import memory.database as db
+        tasks = db.get_workflow_tasks(workflow_id)
+        if not tasks:
+            return {}
+            
+        task_map = {t["id"]: t for t in tasks}
+        children = {t["id"]: [] for t in tasks}
+        roots = []
+        
+        for t in tasks:
+            try:
+                deps = json.loads(t["dependencies"])
+            except Exception:
+                deps = []
+            if not deps:
+                roots.append(t["id"])
+            else:
+                for dep in deps:
+                    if dep in children:
+                        children[dep].append(t["id"])
+                        
+        def _build_json_node(node_id):
+            task = task_map[node_id]
+            return {
+                "id": task["id"],
+                "description": task["description"],
+                "status": task["status"],
+                "agent": task["assigned_agent"],
+                "tool": task["assigned_tool"],
+                "children": [_build_json_node(child) for child in children.get(node_id, [])]
+            }
+            
+        return {
+            "workflow_id": workflow_id,
+            "roots": [_build_json_node(root) for root in roots]
+        }
+
+    def get_planner_metrics(self) -> Dict[str, Any]:
+        """Retrieves aggregated planner metrics from the database."""
+        import memory.database as db
+        return db.get_planner_metrics()

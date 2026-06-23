@@ -117,10 +117,11 @@ class TestPlanner(unittest.TestCase):
             # Check DB storage
             workflows = db.get_all_workflows()
             self.assertTrue(len(workflows) > 0)
-            self.assertEqual(workflows[0]["goal"], "Build test workflow")
-            self.assertEqual(workflows[0]["status"], "COMPLETED")
+            target_wf = next((w for w in workflows if w["goal"] == "Build test workflow"), None)
+            self.assertIsNotNone(target_wf)
+            self.assertEqual(target_wf["status"], "COMPLETED")
             
-            tasks = db.get_workflow_tasks(workflows[0]["id"])
+            tasks = db.get_workflow_tasks(target_wf["id"])
             self.assertEqual(len(tasks), 2)
             self.assertEqual(tasks[0]["status"], "COMPLETED")
             self.assertEqual(tasks[1]["status"], "COMPLETED")
@@ -207,6 +208,129 @@ class TestPlanner(unittest.TestCase):
             
             tasks = db.get_workflow_tasks(workflow_id)
             self.assertEqual(tasks[1]["status"], "COMPLETED")
+
+    def test_workflow_sequential_ids(self):
+        mock_brain = MagicMock()
+        engine = WorkflowEngine(mock_brain)
+        
+        # Mock dependencies and decomposer
+        engine.decomposer.decompose = MagicMock(return_value=[
+            Task(id="task_1", description="Task 1", assigned_agent="Coder", assigned_tool="create_folder")
+        ])
+        engine.verifier.verify = MagicMock(return_value=True)
+        
+        mock_tool = MagicMock()
+        mock_tool.validate_arguments.return_value = MagicMock()
+        mock_tool.execute.return_value = "Success"
+        
+        with patch("tools.registry.ToolRegistry.get_tool", return_value=mock_tool):
+            engine.run_workflow("Sequential ID Test Goal")
+            
+            workflows = db.get_all_workflows()
+            latest_wf = next((w for w in workflows if w["goal"] == "Sequential ID Test Goal"), None)
+            self.assertIsNotNone(latest_wf)
+            self.assertTrue(latest_wf["id"].startswith("WF-"))
+            
+    def test_confidence_threshold_clarification(self):
+        mock_brain = MagicMock()
+        # Mock confidence score to be low
+        mock_brain.process_message.return_value = '{"confidence": 55, "reason": "Unclear target path"}'
+        engine = WorkflowEngine(mock_brain)
+        
+        res = engine.run_workflow("Unclear goal request")
+        self.assertIn("I require clarification, sir.", res)
+        self.assertIn("55%", res)
+        
+    def test_timeline_replay(self):
+        mock_brain = MagicMock()
+        engine = WorkflowEngine(mock_brain)
+        
+        # Seed timeline event
+        import uuid
+        wf_id = "WF-" + str(uuid.uuid4())[:8]
+        db.add_timeline_event(wf_id, "task_id", "Task Started", "Began executing")
+        
+        events = engine.replay_workflow(wf_id)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "Task Started")
+        
+    def test_mission_control_state(self):
+        mock_brain = MagicMock()
+        engine = WorkflowEngine(mock_brain)
+        
+        # Seed completed workflow in DB
+        wf_id = "WF-MC-TEST"
+        db.create_workflow(wf_id, "Mission Control Test Goal", "COMPLETED")
+        db.add_workflow_task(
+            task_id="t_mc_1",
+            workflow_id=wf_id,
+            description="Task 1",
+            dependencies="[]",
+            priority=1,
+            assigned_agent="Coder",
+            assigned_tool="create_folder",
+            args="{}",
+            status="COMPLETED",
+            expected_result="Folder created"
+        )
+        
+        state = engine.get_mission_control_state(wf_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.workflow_id, wf_id)
+        self.assertEqual(state.progress_pct, 100)
+        self.assertEqual(state.status, "COMPLETED")
+        
+    def test_workflow_tree_visualization(self):
+        mock_brain = MagicMock()
+        engine = WorkflowEngine(mock_brain)
+        
+        wf_id = "WF-MC-TREE-TEST"
+        db.create_workflow(wf_id, "Visual Tree Test Goal", "COMPLETED")
+        db.add_workflow_task(
+            task_id="t_tree_1",
+            workflow_id=wf_id,
+            description="Root Task",
+            dependencies="[]",
+            priority=1,
+            assigned_agent="Coder",
+            assigned_tool="create_folder",
+            args="{}",
+            status="COMPLETED",
+            expected_result="Folder created"
+        )
+        db.add_workflow_task(
+            task_id="t_tree_2",
+            workflow_id=wf_id,
+            description="Child Task",
+            dependencies='["t_tree_1"]',
+            priority=2,
+            assigned_agent="Coder",
+            assigned_tool="create_file",
+            args="{}",
+            status="COMPLETED",
+            expected_result="File created"
+        )
+        
+        text_tree = engine.get_workflow_tree_text(wf_id)
+        self.assertIn("Root Task", text_tree)
+        self.assertIn("Child Task", text_tree)
+        
+        json_tree = engine.get_workflow_tree_json(wf_id)
+        self.assertEqual(json_tree["workflow_id"], wf_id)
+        self.assertEqual(len(json_tree["roots"]), 1)
+        self.assertEqual(json_tree["roots"][0]["id"], "t_tree_1")
+        self.assertEqual(json_tree["roots"][0]["children"][0]["id"], "t_tree_2")
+
+    def test_planner_metrics(self):
+        mock_brain = MagicMock()
+        engine = WorkflowEngine(mock_brain)
+        
+        # Seed log and verify metrics API doesn't throw and retrieves details
+        db.add_structured_log("WF-METRICS-1", "task_1", "Coder", "create_file", 0.45, "COMPLETED", "INFO")
+        
+        metrics = engine.get_planner_metrics()
+        self.assertIn("avg_task_time", metrics)
+        self.assertIn("success_rate", metrics)
 
 if __name__ == "__main__":
     unittest.main()

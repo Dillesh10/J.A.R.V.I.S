@@ -15,4 +15,5 @@ temp_screen.png
 *.mp3
 .DS_Store
 *.db
+workflow_logs.jsonl
 
