@@ -5,6 +5,7 @@ from typing import Optional, Dict
 from pydantic import BaseModel, Field
 from tools.base import BaseTool
 from tools.registry import register_tool
+import memory.database as db
 
 # Global registry of active background processes managed by J.A.R.V.I.S.
 _managed_processes: Dict[int, subprocess.Popen] = {}
@@ -56,8 +57,10 @@ class ExecuteCommandTool(BaseTool):
                 )
                 with _lock:
                     _managed_processes[proc.pid] = proc
+                db.add_command_history(command, "SUCCESS")
                 return f"Successfully launched background command '{command}' with PID {proc.pid}, sir."
             except Exception as e:
+                db.add_command_history(command, "FAILED", str(e))
                 return f"Error launching background command: {str(e)}"
         else:
             try:
@@ -79,10 +82,15 @@ class ExecuteCommandTool(BaseTool):
                     output += f"Errors/Warnings:\n{res.stderr.strip()}\n"
                 if not output:
                     output = "Command completed with no output."
+                
+                status = "SUCCESS" if res.returncode == 0 else "FAILED"
+                db.add_command_history(command, status, res.stderr if res.returncode != 0 else "")
                 return f"Command exit code: {res.returncode}\n{output}"
             except subprocess.TimeoutExpired:
+                db.add_command_history(command, "FAILED", "Command timed out after 60 seconds")
                 return f"Command execution timed out after 60 seconds, sir."
             except Exception as e:
+                db.add_command_history(command, "FAILED", str(e))
                 return f"Error running command: {str(e)}"
 
 # ─── MANAGE PROCESSES TOOL ────────────────────────────────────────────────────

@@ -137,7 +137,86 @@ class JarvisRouter:
                 logger.log(f"Vision routing error: {e}", category="ROUTER")
                 return f"[Vision Error]: {str(e)}"
 
-        # 2. General Case: Try OpenRouter (Unlimited Brain)
+        # Shortcut for Auditing, Resuming, or Repeating Workflows/Commands
+        if "resume" in lower_input and "workflow" in lower_input:
+            import memory.database as db
+            workflows = db.get_all_workflows()
+            target_wf = None
+            for w in workflows:
+                if w["status"] in ["FAILED", "RUNNING"]:
+                    target_wf = w
+                    break
+            if target_wf:
+                logger.log(f"[Router] Resuming workflow: '{target_wf['goal']}' (ID: {target_wf['id']})", category="ROUTER")
+                try:
+                    from core.planner import WorkflowEngine
+                    from core.brain import UnifiedBrain
+                    planner_brain = UnifiedBrain(
+                        name="Planner_Core",
+                        system_instruction="You are the J.A.R.V.I.S. Core Brain. Help plan tasks."
+                    )
+                    engine = WorkflowEngine(planner_brain)
+                    return engine.resume_workflow(target_wf["id"])
+                except Exception as e:
+                    return f"Failed to resume workflow, sir. Error: {e}"
+            else:
+                return "I couldn't find any interrupted or failed workflows to resume, sir."
+
+        if "repeat" in lower_input and "workflow" in lower_input:
+            import memory.database as db
+            workflows = db.get_all_workflows()
+            if workflows:
+                last_goal = workflows[0]["goal"]
+                logger.log(f"[Router] Repeating last workflow with goal: '{last_goal}'", category="ROUTER")
+                try:
+                    from core.planner import WorkflowEngine
+                    from core.brain import UnifiedBrain
+                    planner_brain = UnifiedBrain(
+                        name="Planner_Core",
+                        system_instruction="You are the J.A.R.V.I.S. Core Brain. Help plan tasks."
+                    )
+                    engine = WorkflowEngine(planner_brain)
+                    return engine.run_workflow(last_goal)
+                except Exception as e:
+                    return f"Failed to repeat workflow: {e}"
+            else:
+                return "There are no previous workflows to repeat, sir."
+
+        if any(k in lower_input for k in ["what did i do", "what did i run", "what commands", "history", "workflow history", "yesterday"]):
+            import memory.database as db
+            workflows = db.get_all_workflows()
+            commands = db.get_command_history(limit=15)
+            
+            res_str = "Here is what you did recently, sir:\n"
+            if workflows:
+                res_str += "\nRecent Workflows planned/executed:\n"
+                for w in workflows[:5]:
+                    res_str += f"- [{w['created_at']}] Goal: '{w['goal']}' -> Status: {w['status']}\n"
+            if commands:
+                res_str += "\nRecent Terminal Commands:\n"
+                for cmd in commands[:5]:
+                    res_str += f"- [{cmd['timestamp']}] {cmd['command']} -> {cmd['status']}\n"
+            if not workflows and not commands:
+                return "You haven't run any workflows or commands yet today, sir."
+            return res_str
+
+        # 2. Planner Engine Case: Detect multi-step workflow intent
+        try:
+            from core.planner import WorkflowEngine
+            from core.brain import UnifiedBrain
+            planner_brain = UnifiedBrain(
+                name="Planner_Core",
+                system_instruction="You are the J.A.R.V.I.S. Core Brain. Help plan tasks."
+            )
+            engine = WorkflowEngine(planner_brain)
+            analysis = engine.intent_analyzer.analyze(user_input)
+            if analysis.get("category") == "multi_step_workflow":
+                logger.log("[Router] Multi-step goal detected. Invoking Workflow Engine...", category="ROUTER")
+                return engine.run_workflow(user_input)
+        except Exception as e:
+            logger.log(f"[Router] Workflow analyzer or execution failed: {e}", category="ROUTER")
+
+        # 3. General Case: Try OpenRouter (Unlimited Brain)
         router_response = ""
         for attempt, model in enumerate([self.primary_model] + self.fallback_models):
             try:
