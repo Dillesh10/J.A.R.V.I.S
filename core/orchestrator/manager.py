@@ -190,7 +190,8 @@ class IntelligenceOrchestrator:
                 status="PENDING",
                 estimated_duration=getattr(t, 'estimated_duration', 5.0),
                 assigned_tools=getattr(t, 'assigned_tools', []),
-                retry_policy=getattr(t, 'retry_policy', None) or RetryPolicy()
+                retry_policy=getattr(t, 'retry_policy', None) or RetryPolicy(),
+                verification_rule=getattr(t, 'verification_rule', None)
             )
             context.plan.append(step)
 
@@ -215,13 +216,18 @@ class IntelligenceOrchestrator:
                 assigned_agent=s.assigned_agent,
                 assigned_tool=s.assigned_tool,
                 args=json.dumps(s.args),
-                status="PENDING"
+                status="PENDING",
+                expected_result="",
+                verification_rule=s.verification_rule or ""
             )
             
         context.session_id = workflow_id
         logger.log(f"[Orchestrator] Created workflow ID {workflow_id} with {len(context.plan)} tasks.", category="SYSTEM")
 
         # 5. Execution Loop
+        from core.planner import Task, VerificationEngine
+        ve = VerificationEngine()
+        
         for idx, step in enumerate(context.plan):
             context.current_step_idx = idx
             context.active_agent = step.assigned_agent
@@ -235,36 +241,95 @@ class IntelligenceOrchestrator:
             
             # Execute tool
             tool_res = self.tool_manager.execute_tool(step.assigned_tool, step.args)
+            step.result = tool_res["result"] if tool_res["success"] else None
+            step.error = tool_res["error"] if not tool_res["success"] else None
             
-            if tool_res["success"]:
+            # Verification Step
+            step.status = "WAITING_VERIFICATION"
+            if step.id in context.dag_nodes:
+                context.dag_nodes[step.id]["status"] = "WAITING_VERIFICATION"
+            notify_status_update(context, current_stage="Waiting Verification", running_tool=step.assigned_tool)
+            
+            t = Task(**step.model_dump())
+            t.actual_result = tool_res["result"] if tool_res["success"] else tool_res["error"]
+            
+            verified = ve.verify(t, context.session_id)
+            
+            if verified:
                 step.status = "COMPLETED"
-                step.result = tool_res["result"]
                 if step.id in context.dag_nodes:
                     context.dag_nodes[step.id]["status"] = "COMPLETED"
-                db.update_workflow_task(step.id, "COMPLETED", actual_result=tool_res["result"])
+                db.update_workflow_task(step.id, "COMPLETED", actual_result=step.result)
+                notify_status_update(context, current_stage="Verification Passed", running_tool=step.assigned_tool)
             else:
-                # Retry logic
-                step.retry_count += 1
-                context.retry_count += 1
-                logger.log(f"[Orchestrator] Step failed. Attempting retry...", category="SYSTEM")
+                logger.log(f"[Orchestrator] Verification failed for task '{step.description}'. Triggering recovery...", category="SYSTEM")
+                step.status = "RECOVERING"
+                if step.id in context.dag_nodes:
+                    context.dag_nodes[step.id]["status"] = "RECOVERING"
+                notify_status_update(context, current_stage="Recovery Started", running_tool=step.assigned_tool)
                 
-                # Retry call
-                retry_res = self.tool_manager.execute_tool(step.assigned_tool, step.args)
-                if retry_res["success"]:
-                    step.status = "COMPLETED"
-                    step.result = retry_res["result"]
+                # Retry loop with exponential backoff
+                recovered = False
+                max_retries = step.retry_policy.max_retries
+                
+                while step.retry_count < max_retries:
+                    delay = step.retry_policy.backoff_factor ** step.retry_count
+                    step.status = "RETRYING"
                     if step.id in context.dag_nodes:
-                        context.dag_nodes[step.id]["status"] = "COMPLETED"
-                    db.update_workflow_task(step.id, "COMPLETED", actual_result=retry_res["result"])
-                else:
-                    step.status = "FAILED"
-                    step.error = retry_res["error"]
-                    if step.id in context.dag_nodes:
-                        context.dag_nodes[step.id]["status"] = "FAILED"
-                    context.errors.append(retry_res["error"])
-                    db.update_workflow_task(step.id, "FAILED", error_message=retry_res["error"])
-                    context.status = "FAILED"
-                    break
+                        context.dag_nodes[step.id]["status"] = "RETRYING"
+                    
+                    notify_status_update(context, current_stage=f"Retry {step.retry_count + 1}", running_tool=step.assigned_tool)
+                    db.add_retry_record(context.session_id, step.id, step.retry_count + 1, delay)
+                    
+                    logger.log(f"[Orchestrator] Retry attempt {step.retry_count + 1}/{max_retries} after {delay:.2f}s delay...", category="SYSTEM")
+                    time.sleep(delay)
+                    
+                    # Re-run
+                    tool_res = self.tool_manager.execute_tool(step.assigned_tool, step.args)
+                    step.result = tool_res["result"] if tool_res["success"] else None
+                    step.error = tool_res["error"] if not tool_res["success"] else None
+                    
+                    t.actual_result = tool_res["result"] if tool_res["success"] else tool_res["error"]
+                    verified = ve.verify(t, context.session_id)
+                    
+                    if verified:
+                        step.status = "COMPLETED"
+                        if step.id in context.dag_nodes:
+                            context.dag_nodes[step.id]["status"] = "COMPLETED"
+                        db.update_workflow_task(step.id, "COMPLETED", actual_result=step.result)
+                        notify_status_update(context, current_stage="Recovery Succeeded", running_tool=step.assigned_tool)
+                        recovered = True
+                        break
+                    else:
+                        step.retry_count += 1
+                        context.retry_count += 1
+                        
+                if not recovered:
+                    # Adaptive Execution Solver
+                    logger.log(f"[Orchestrator] Retries exhausted. Attempting adaptive recovery...", category="SYSTEM")
+                    if self._attempt_adaptive_recovery(context, step):
+                        notify_status_update(context, current_stage="Recovery Succeeded", running_tool=step.assigned_tool)
+                        db.update_workflow_task(step.id, "COMPLETED", actual_result=step.result)
+                    else:
+                        step.status = "FAILED"
+                        if step.id in context.dag_nodes:
+                            context.dag_nodes[step.id]["status"] = "FAILED"
+                        
+                        db.add_workflow_failure(
+                            workflow_id=context.session_id,
+                            task_id=step.id,
+                            failure_type="VerificationFailure",
+                            failure_reason=step.error or "Verification checks failed",
+                            failed_tool=step.assigned_tool,
+                            failed_agent=step.assigned_agent,
+                            stack_summary=None,
+                            provider=context.active_provider,
+                            duration=None,
+                            retry_count=step.retry_count
+                        )
+                        db.update_workflow_task(step.id, "FAILED", error_message=step.error or "Verification failed")
+                        context.status = "FAILED"
+                        break
 
         if context.status != "FAILED":
             context.status = "COMPLETED"
@@ -309,6 +374,100 @@ class IntelligenceOrchestrator:
         
         notify_status_update(context, current_stage="Completed")
         return response_text
+
+    def _attempt_adaptive_recovery(self, context: ExecutionContext, step: ExecutionStep) -> bool:
+        """Attempts to recover a failed task step using adaptive strategies."""
+        import memory.database as db
+        from core.providers import provider_manager
+        from core.planner import Task, VerificationEngine
+        import re
+        
+        db.add_recovery_record(context.session_id, step.id, "Adaptive Recovery", "Initiating adaptive recovery solver")
+        
+        # Strategy A: Switch Provider
+        current_prov = provider_manager.last_active_provider
+        fallback_providers = [p for p in ["openrouter", "gemini", "ollama"] if p != current_prov]
+        if fallback_providers:
+            next_prov = fallback_providers[0]
+            context.active_provider = next_prov
+            logger.log(f"[Orchestrator Recovery] Adaptive provider fallback: Switching to '{next_prov}'", category="SYSTEM")
+            db.add_recovery_record(context.session_id, step.id, "Switch Provider", f"Switched active provider to {next_prov}")
+            
+            tool_res = self.tool_manager.execute_tool(step.assigned_tool, step.args)
+            if tool_res["success"]:
+                step.result = tool_res["result"]
+                step.error = None
+                ve = VerificationEngine()
+                t = Task(**step.model_dump())
+                if ve.verify(t, context.session_id):
+                    step.status = "COMPLETED"
+                    if step.id in context.dag_nodes:
+                        context.dag_nodes[step.id]["status"] = "COMPLETED"
+                    return True
+                    
+        # Strategy B: Alternative Tool / Args (via LLM query)
+        from core.brain import UnifiedBrain
+        recovery_brain = UnifiedBrain(name="Recovery_Core", system_instruction="You help recover failed tasks.")
+        prompt = f"""
+        A task in the workflow has failed.
+        Goal: "{context.goal}"
+        Failed Step ID: "{step.id}"
+        Failed Task Description: "{step.description}"
+        Assigned Tool: "{step.assigned_tool}"
+        Args: {json.dumps(step.args)}
+        Error Message: "{step.error or 'Verification failed'}"
+
+        Determine if we can recover by:
+        1. Using a different tool.
+        2. Modifying arguments.
+
+        Respond ONLY in the following JSON format:
+        {{
+            "action": "retry_with_alternative" or "abort",
+            "alternative_tool": "string (new tool name)",
+            "alternative_args": {{}}
+        }}
+        """
+        try:
+            res = recovery_brain.process_message(prompt, session_id="recovery_internal")
+            match = re.search(r"\{.*\}", res, re.DOTALL)
+            if match:
+                decision = json.loads(match.group(0))
+                if decision["action"] == "retry_with_alternative":
+                    alt_tool = decision.get("alternative_tool", step.assigned_tool)
+                    alt_args = decision.get("alternative_args", step.args)
+                    
+                    logger.log(f"[Orchestrator Recovery] Adaptive tool fallback: Retrying with '{alt_tool}'", category="SYSTEM")
+                    db.add_recovery_record(context.session_id, step.id, "Alternative Tool", f"Alternative tool {alt_tool}")
+                    
+                    tool_res = self.tool_manager.execute_tool(alt_tool, alt_args)
+                    if tool_res["success"]:
+                        step.result = tool_res["result"]
+                        step.error = None
+                        ve = VerificationEngine()
+                        t = Task(**step.model_dump())
+                        t.assigned_tool = alt_tool
+                        t.args = alt_args
+                        if ve.verify(t, context.session_id):
+                            step.assigned_tool = alt_tool
+                            step.args = alt_args
+                            step.status = "COMPLETED"
+                            if step.id in context.dag_nodes:
+                                context.dag_nodes[step.id]["status"] = "COMPLETED"
+                            return True
+        except Exception as e:
+            logger.log(f"[Orchestrator Recovery] LLM recovery analysis failed: {e}", category="SYSTEM")
+
+        # Strategy C: Skip optional tasks
+        if "optional" in step.description.lower():
+            logger.log(f"[Orchestrator Recovery] Optional task skipped: '{step.description}'", category="SYSTEM")
+            db.add_recovery_record(context.session_id, step.id, "Skip Task", "Task skipped")
+            step.status = "SKIPPED"
+            if step.id in context.dag_nodes:
+                context.dag_nodes[step.id]["status"] = "SKIPPED"
+            return True
+
+        return False
 
     def _load_memory_to_context(self, context: ExecutionContext) -> None:
         """Retrieves prior user context and preferences from Memory."""

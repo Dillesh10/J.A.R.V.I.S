@@ -20,6 +20,7 @@ class ExecutionStep(BaseModel):
     estimated_duration: float = Field(default=5.0)
     assigned_tools: List[str] = Field(default=[])
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
+    verification_rule: Optional[str] = None
 
 class GoalAnalysis(BaseModel):
     primary_objective: str

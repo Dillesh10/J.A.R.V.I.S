@@ -468,73 +468,109 @@ class TaskGraph:
 # ─── VERIFICATION ENGINE ──────────────────────────────────────────────────────
 
 class VerificationEngine:
-    def verify(self, task: Task) -> bool:
-        """Verifies if the task succeeded by validating files, outputs, or processes."""
+    def verify(self, task: Task, workflow_id: str = "default_workflow") -> bool:
+        """Verifies if the task succeeded, logs record to DB, and returns status."""
+        import memory.database as db
+        
         tool = task.assigned_tool
         args = task.args
         result = task.actual_result or ""
+        
+        # Check standard rule
+        rule = task.verification_rule
+        success = True
+        details = ""
 
         # Safe verification by checking tool outputs/side effects
         if "error" in result.lower() or "failed" in result.lower():
-            return False
-
-        # Check explicit verification rules if specified
-        rule = task.verification_rule
-        if rule:
-            if rule == "file_exists":
-                filename = args.get("file_name") or args.get("filename") or args.get("path")
-                if filename:
-                    from tools.desktop import _get_desktop_path
-                    import pathlib
-                    path = pathlib.Path(filename)
-                    if not path.is_absolute():
-                        path = _get_desktop_path() / path
-                    return path.exists() and path.is_file()
-            elif rule in ["directory_exists", "folder_exists"]:
-                foldername = args.get("folder_name") or args.get("foldername") or args.get("path")
-                if foldername:
-                    from tools.desktop import _get_desktop_path
-                    import pathlib
-                    path = pathlib.Path(foldername)
-                    if not path.is_absolute():
-                        path = _get_desktop_path() / path
-                    return path.exists() and path.is_dir()
-            elif rule == "process_running":
-                process_name = args.get("process_name") or args.get("app_name")
-                if process_name:
-                    from tools.registry import tool_registry
-                    try:
-                        list_proc_tool = tool_registry.get_tool("list_processes")
-                        proc_list = str(list_proc_tool.execute())
-                        return process_name.lower() in proc_list.lower()
-                    except Exception:
-                        pass
-            elif rule == "exit_code_zero":
-                match = re.search(r"exit code:\s*(\d+)", result)
-                if match and match.group(1) != "0":
-                    return False
-                return True
-
-        # Fallback implicit checks
-        if tool == "create_folder":
-            folder = args.get("folder_name")
-            from tools.desktop import _get_desktop_path
-            path = _get_desktop_path() / folder
-            return path.exists() and path.is_dir()
-
-        elif tool in ["create_file", "write_file"]:
-            filename = args.get("file_name")
-            from tools.desktop import _get_desktop_path
-            path = _get_desktop_path() / filename
-            return path.exists() and path.is_file()
-
-        elif tool == "execute_command":
-            match = re.search(r"exit code:\s*(\d+)", result)
-            if match and match.group(1) != "0":
-                return False
-            return True
-
-        return True
+            success = False
+            details = f"Failure keywords detected in tool response: {result}"
+        else:
+            if rule:
+                if rule == "file_exists":
+                    filename = args.get("file_name") or args.get("filename") or args.get("path")
+                    if filename:
+                        from tools.desktop import _get_desktop_path
+                        import pathlib
+                        path = pathlib.Path(filename)
+                        if not path.is_absolute():
+                            path = _get_desktop_path() / path
+                        success = path.exists() and path.is_file()
+                        details = f"File exists check for '{filename}': {success}"
+                    else:
+                        success = False
+                        details = "file_exists rule missing filename argument."
+                elif rule in ["directory_exists", "folder_exists"]:
+                    foldername = args.get("folder_name") or args.get("foldername") or args.get("path")
+                    if foldername:
+                        from tools.desktop import _get_desktop_path
+                        import pathlib
+                        path = pathlib.Path(foldername)
+                        if not path.is_absolute():
+                            path = _get_desktop_path() / path
+                        success = path.exists() and path.is_dir()
+                        details = f"Directory exists check for '{foldername}': {success}"
+                    else:
+                        success = False
+                        details = "directory_exists rule missing foldername argument."
+                elif rule == "process_running":
+                    process_name = args.get("process_name") or args.get("app_name")
+                    if process_name:
+                        from tools.registry import tool_registry
+                        try:
+                            list_proc_tool = tool_registry.get_tool("list_processes")
+                            proc_list = str(list_proc_tool.execute())
+                            success = process_name.lower() in proc_list.lower()
+                            details = f"Process running check for '{process_name}': {success}"
+                        except Exception as e:
+                            success = False
+                            details = f"Process check failed with exception: {e}"
+                    else:
+                        success = False
+                        details = "process_running rule missing process_name argument."
+                elif rule == "http_success":
+                    success = "200" in result or "success" in result.lower() or "ok" in result.lower()
+                    details = f"HTTP status verification check: {success}"
+                elif rule == "command_exit_zero":
+                    match = re.search(r"exit code:\s*(\d+)", result)
+                    success = not (match and match.group(1) != "0")
+                    details = f"Command exit code zero check: {success}"
+                elif rule == "tool_result":
+                    success = len(result.strip()) > 0 and "error" not in result.lower()
+                    details = f"Tool output result validation check: {success}"
+                elif rule == "custom":
+                    success = "error" not in result.lower()
+                    details = f"Custom validation check: {success}"
+            else:
+                # Fallback implicit checks
+                if tool == "create_folder":
+                    folder = args.get("folder_name")
+                    if folder:
+                        from tools.desktop import _get_desktop_path
+                        path = _get_desktop_path() / folder
+                        success = path.exists() and path.is_dir()
+                        details = f"Implicit directory check for '{folder}': {success}"
+                elif tool in ["create_file", "write_file"]:
+                    filename = args.get("file_name")
+                    if filename:
+                        from tools.desktop import _get_desktop_path
+                        path = _get_desktop_path() / filename
+                        success = path.exists() and path.is_file()
+                        details = f"Implicit file check for '{filename}': {success}"
+                elif tool == "execute_command":
+                    match = re.search(r"exit code:\s*(\d+)", result)
+                    success = not (match and match.group(1) != "0")
+                    details = f"Implicit exit code check: {success}"
+        
+        # Save verification log record
+        db.add_verification_record(
+            workflow_id=workflow_id,
+            task_id=task.id,
+            verification_type=rule or "implicit",
+            success=1 if success else 0,
+            result_details=details
+        )
+        return success
 
 # ─── PROGRESS TRACKER (MISSION CONTROL) ───────────────────────────────────────
 

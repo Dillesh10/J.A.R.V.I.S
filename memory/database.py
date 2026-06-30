@@ -155,6 +155,57 @@ def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Create verification history table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS verification_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                verification_type TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                result_details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create recovery history table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recovery_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                recovery_policy TEXT NOT NULL,
+                action_taken TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create retry history table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS retry_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                delay REAL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create workflow failures table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                failure_type TEXT NOT NULL,
+                failure_reason TEXT,
+                failed_tool TEXT,
+                failed_agent TEXT,
+                stack_summary TEXT,
+                provider TEXT,
+                duration REAL,
+                retry_count INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     # Run safe column migrations
     migrate_db()
@@ -511,3 +562,38 @@ def get_all_registered_plugins() -> list:
     with get_connection() as conn:
         rows = conn.execute("SELECT * FROM plugins_registry ORDER BY id ASC").fetchall()
         return [dict(row) for row in rows]
+
+# Verification, Recovery & Failure Persistence Helpers
+def add_verification_record(workflow_id: str, task_id: str, verification_type: str, success: int, result_details: Optional[str] = None):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO verification_history (workflow_id, task_id, verification_type, success, result_details) VALUES (?, ?, ?, ?, ?)",
+            (workflow_id, task_id, verification_type, success, result_details)
+        )
+        conn.commit()
+
+def add_recovery_record(workflow_id: str, task_id: str, recovery_policy: str, action_taken: str):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO recovery_history (workflow_id, task_id, recovery_policy, action_taken) VALUES (?, ?, ?, ?)",
+            (workflow_id, task_id, recovery_policy, action_taken)
+        )
+        conn.commit()
+
+def add_retry_record(workflow_id: str, task_id: str, attempt: int, delay: Optional[float] = None):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO retry_history (workflow_id, task_id, attempt, delay) VALUES (?, ?, ?, ?)",
+            (workflow_id, task_id, attempt, delay)
+        )
+        conn.commit()
+
+def add_workflow_failure(workflow_id: str, task_id: str, failure_type: str, failure_reason: Optional[str], failed_tool: Optional[str], failed_agent: Optional[str], stack_summary: Optional[str], provider: Optional[str], duration: Optional[float], retry_count: Optional[int]):
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO workflow_failures 
+               (workflow_id, task_id, failure_type, failure_reason, failed_tool, failed_agent, stack_summary, provider, duration, retry_count) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (workflow_id, task_id, failure_type, failure_reason, failed_tool, failed_agent, stack_summary, provider, duration, retry_count)
+        )
+        conn.commit()
