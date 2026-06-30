@@ -119,3 +119,37 @@ class Task(BaseModel):
     assigned_tools: List[str]
     retry_policy: RetryPolicy
 ```
+
+---
+
+## 5. Verification, Recovery & Adaptive Execution (Sprint 11.3)
+
+Every execution step proceeds through a structured lifecycle: **Plan** $\rightarrow$ **Execute** $\rightarrow$ **Verify** $\rightarrow$ **Recover** (if required) $\rightarrow$ **Continue**.
+
+### 5.1 Verification Engine
+Calculates post-execution validity using explicit verification rules:
+* `file_exists`: Verifies file generation on disk.
+* `directory_exists`: Verifies folder structure on disk.
+* `process_running`: Queries local active task lists to confirm process states.
+* `http_success`: Confirms status `200` / success keys inside tool responses.
+* `command_exit_zero`: Verifies subprocess exit code is equal to `0`.
+* `tool_result`: Ensures the tool returned non-empty, error-free outputs.
+* `custom`: General LLM/logical custom verification check.
+
+### 5.2 Recovery Engine & Adaptive Policies
+If a step fails verification, the engine triggers recovery paths:
+1. **Exponential Retry**: Schedules retries using the task's `RetryPolicy` parameters:
+   $$\text{delay} = \text{backoff\_factor}^{\text{attempt}}$$
+2. **Adaptive Provider Fallback**: Switches to alternative configured AI providers (e.g. `gemini` $\rightarrow$ `ollama`) to bypass rate limits or API downtime.
+3. **Adaptive Tool Fallback**: Queries a specialized Recovery Brain to rewrite the failing task's target tool or parameter structure.
+4. **Skip Optional**: Continues execution on non-critical tasks containing `"optional"` markers.
+5. **Abort & Escalate**: Transitions workflow state to `FAILED` / `ABORTED` on persistent errors.
+
+### 5.3 Persisted Telemetry
+All lifecycle events are logged to the database:
+* `verification_history`: Tracks checks, rules, and outcomes.
+* `retry_history`: Logs attempt indices and delays.
+* `recovery_history`: Logs adaptive decisions.
+* `workflow_failures`: Logs structured tool failure exceptions for debugging.
+* WebSocket telemetry broadcasts events: `Verification passed`, `Verification failed`, `Retry N`, `Recovery succeeded`.
+
