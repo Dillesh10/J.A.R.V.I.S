@@ -4,3 +4,4 @@ colorama
 openai
 fastapi
 uvicorn
+websockets

@@ -26,8 +26,8 @@ def get_jarvis_core():
     with jarvis_lock:
         if jarvis_core is None:
             # Check for API Keys
-            from core.router import OPENROUTER_KEY
-            if not OPENROUTER_KEY or OPENROUTER_KEY == "your_openrouter_api_key_here":
+            openrouter_key = os.getenv("OPENROUTER_API_KEY")
+            if not openrouter_key or openrouter_key == "your_openrouter_api_key_here":
                 logger.log("Failed to initialize: OPENROUTER_API_KEY is not set or is still the placeholder.", category="SYSTEM")
                 raise HTTPException(
                     status_code=503,
