@@ -53,12 +53,42 @@ Decomposes goals into a task list where each task contains:
 * **`verification_rule`**: Success verification parameters.
 * **`retry_policy`**: Max retries and backoff factors.
 
-### Stage 3: DAG Parallel Execution Scheduler (Sprint 11.2 - Future)
-Converts decomposed tasks into a Directed Acyclic Graph (DAG) for concurrent scheduling of independent branches.
+### Stage 3: DAG Parallel Execution Scheduler (Sprint 11.2)
+Converts decomposed tasks into a Directed Acyclic Graph (DAG) for concurrent scheduling of independent branches. Calculates critical path bottlenecks and slack values.
 
 ---
 
-## 3. Data Models
+## 3. DAG Architecture & Scheduling Algorithms
+
+### 3.1 Cycle Rejection (DAG Validation)
+The scheduler represents tasks as graph nodes and dependency constraints as directed edges. Cycle detection is integrated directly into Kahn's topological sort:
+* If the count of sorted nodes does not equal the total node count, a cycle exists.
+* The system raises a `ValueError` immediately, aborting execution to prevent lockouts.
+
+### 3.2 Topological Sort (Kahn's Algorithm)
+A queue stores all nodes with an in-degree of 0. Execution order is rendered deterministic by sorting this queue dynamically:
+1. First by task priority (highest priority first).
+2. Second by task ID (lexicographically ascending) to prevent indeterminacy when priorities are equal.
+
+### 3.3 Critical Path Method (CPM)
+Critical Path analysis uses a two-pass algorithm over the sorted topological sequence:
+1. **Forward Pass**: Computes Earliest Start ($ES$) and Earliest Finish ($EF$) times:
+   $$ES_i = \max_{p \in \text{parents}(i)} EF_p$$
+   $$EF_i = ES_i + \text{duration}_i$$
+2. **Backward Pass**: Computes Latest Finish ($LF$) and Latest Start ($LS$) times:
+   $$LF_i = \min_{c \in \text{children}(i)} LS_c$$
+   $$LS_i = LF_i - \text{duration}_i$$
+3. **Slack & Critical Path**: Slack is defined as $LS - ES$. Tasks with a slack value of 0 form the critical path.
+4. **Bottlenecks**: Isolated as the critical path nodes with the largest estimated duration.
+
+### 3.4 Execution Stages
+To determine safe concurrent executions, tasks are grouped into independent parallel layers:
+* **Layer 0**: Nodes with no parent dependencies.
+* **Layer $N+1$**: Nodes whose dependencies are completely satisfied by layers $0$ to $N$.
+
+---
+
+## 4. Data Models
 
 ### GoalAnalysis
 ```python
