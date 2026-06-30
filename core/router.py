@@ -100,10 +100,10 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
 
     def process_input(self, user_input: str, session_id: str = "default") -> str:
         """
-        Public entry point that handles user input routing and automatically
-        persists the conversation session logs to SQLite database.
+        Public entry point routed via the central IntelligenceOrchestrator.
         """
-        result = self._process_input_core(user_input, session_id)
+        from core.orchestrator import orchestrator
+        result = orchestrator.execute(user_input, session_id)
         
         # Save both request and response to session log history
         import memory.database as db

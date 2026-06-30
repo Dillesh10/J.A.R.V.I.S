@@ -52,8 +52,31 @@ def open_browser():
     logger.log(f"Opening J.A.R.V.I.S. interface in browser: {url}", category="SYSTEM")
     webbrowser.open(url)
 
+main_loop = None
+_active_websockets = set()
+
+def broadcast_telemetry(data: dict):
+    global main_loop
+    if main_loop and _active_websockets:
+        asyncio.run_coroutine_threadsafe(_broadcast_async(data), main_loop)
+
+async def _broadcast_async(data: dict):
+    for ws in list(_active_websockets):
+        try:
+            await ws.send_json({
+                "type": "status",
+                "data": data
+            })
+        except Exception:
+            pass
+
+from core.orchestrator import register_status_callback
+register_status_callback(broadcast_telemetry)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global main_loop
+    main_loop = asyncio.get_running_loop()
     # Startup: Start thread to open browser (only when running locally)
     if os.environ.get("VERCEL") != "1":
         threading.Thread(target=open_browser, daemon=True).start()
@@ -82,6 +105,7 @@ from core.router import user_timezone_var
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    _active_websockets.add(websocket)
     core = get_jarvis_core()
     
     # Task to stream log entries to client in real time
@@ -135,6 +159,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        _active_websockets.discard(websocket)
         publisher_task.cancel()
 
 class ChatRequest(BaseModel):

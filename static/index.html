@@ -116,6 +116,21 @@
 
             <!-- Right Panel: Agent Status & Console Logs -->
             <section class="panel right-panel">
+                <div class="widget intelligence-widget" id="intelligence-widget">
+                    <div class="widget-header">
+                        <h2>INTELLIGENCE TELEMETRY</h2>
+                        <span class="accent-line"></span>
+                    </div>
+                    <div class="widget-content">
+                        <div class="stat-row"><span class="stat-label">INTENT:</span><span id="tel-intent" class="stat-value" style="text-transform: uppercase;">IDLE</span></div>
+                        <div class="stat-row"><span class="stat-label">STAGE:</span><span id="tel-stage" class="stat-value" style="color: #ffaa00; text-transform: uppercase;">READY</span></div>
+                        <div class="stat-row"><span class="stat-label">RUNNING TOOL:</span><span id="tel-tool" class="stat-value" style="color: #00ff66;">NONE</span></div>
+                        <div class="stat-row"><span class="stat-label">ACTIVE AGENT:</span><span id="tel-agent" class="stat-value">NONE</span></div>
+                        <div class="stat-row"><span class="stat-label">PROVIDER:</span><span id="tel-provider" class="stat-value">NONE</span></div>
+                        <div class="stat-row"><span class="stat-label">STEPS:</span><span id="tel-progress" class="stat-value">0 / 0</span></div>
+                    </div>
+                </div>
+
                 <div class="widget agent-status-widget">
                     <div class="widget-header">
                         <h2>ACTIVE AGENT REGISTRY</h2>

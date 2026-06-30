@@ -276,6 +276,25 @@ function connectWebSocket() {
 }
 
 function handleWebSocketMessage(data) {
+    if (data.type === "status") {
+        const tel = data.data;
+        document.getElementById('tel-intent').textContent = tel.intent || "IDLE";
+        document.getElementById('tel-stage').textContent = tel.current_stage || "READY";
+        document.getElementById('tel-tool').textContent = tel.running_tool || "NONE";
+        document.getElementById('tel-agent').textContent = tel.active_agent || "NONE";
+        document.getElementById('tel-provider').textContent = tel.active_provider || "NONE";
+        document.getElementById('tel-progress').textContent = `${tel.current_step_idx} / ${tel.total_steps}`;
+        
+        const stageEl = document.getElementById('tel-stage');
+        if (tel.current_stage === "Completed") {
+            stageEl.style.color = "#00ff66";
+        } else if (tel.current_stage === "Failed") {
+            stageEl.style.color = "#ff3344";
+        } else {
+            stageEl.style.color = "#ffaa00";
+        }
+        return;
+    }
     if (data.type === "log") {
         const logDiv = document.createElement('div');
         const catClass = data.category.toLowerCase();
