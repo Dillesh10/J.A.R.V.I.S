@@ -15,8 +15,17 @@ class ToolRegistry:
         """Registers a BaseTool instance."""
         original_execute = tool.execute
 
+        # Check if this tool is being registered by a plugin
+        try:
+            from core.plugins.manager import loading_plugin_id_var
+            plugin_id = loading_plugin_id_var.get()
+            if plugin_id:
+                tool.plugin_id = plugin_id
+        except ImportError:
+            pass
+
         def secure_execute(*args, **kwargs):
-            from core.security import permission_engine
+            from core.security import permission_engine, active_plugin_id_var
             # Map positional arguments to schema field names if applicable
             args_dict = {}
             if kwargs:
@@ -31,12 +40,26 @@ class ToolRegistry:
                 for idx, val in enumerate(args):
                     args_dict[f"arg_{idx}"] = val
 
-            permission_engine.check_tool_permission(tool.name, args_dict)
-            return original_execute(*args, **kwargs)
+            plugin_id_exec = getattr(tool, "plugin_id", None)
+            token = None
+            if plugin_id_exec:
+                token = active_plugin_id_var.set(plugin_id_exec)
+            try:
+                permission_engine.check_tool_permission(tool.name, args_dict)
+                return original_execute(*args, **kwargs)
+            finally:
+                if token:
+                    active_plugin_id_var.reset(token)
 
         tool.execute = secure_execute
         self._tools[tool.name] = tool
         logger.log(f"Registered tool: '{tool.name}'", category="SYSTEM")
+
+    def unregister(self, name: str):
+        """Unregisters a tool from the registry."""
+        if name in self._tools:
+            del self._tools[name]
+            logger.log(f"Unregistered tool: '{name}'", category="SYSTEM")
 
     def get_tool(self, name: str) -> BaseTool:
         """Retrieves a registered tool by name."""

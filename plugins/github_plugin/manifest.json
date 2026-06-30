@@ -1,0 +1,13 @@
+{
+  "id": "github_plugin",
+  "name": "GitHub Plugin",
+  "version": "1.0.0",
+  "api_version": "v1",
+  "description": "Adds GitHub workflow tools.",
+  "author": "J.A.R.V.I.S. Team",
+  "license": "MIT",
+  "category": "Git",
+  "entry_point": "plugin.py",
+  "permissions_requested": ["execute_command"],
+  "supported_platforms": ["windows", "linux", "mac"]
+}

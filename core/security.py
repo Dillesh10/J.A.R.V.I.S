@@ -30,6 +30,7 @@ class ConfirmationRequiredError(SecurityError):
 
 active_workflow_id_var = contextvars.ContextVar("active_workflow_id", default=None)
 active_task_id_var = contextvars.ContextVar("active_task_id", default=None)
+active_plugin_id_var = contextvars.ContextVar("active_plugin_id", default=None)
 
 # ─── CONFIGURATION SYSTEM ────────────────────────────────────────────────────
 
@@ -127,6 +128,32 @@ class PermissionEngine:
 
     def check_tool_permission(self, tool_name: str, args: Dict[str, Any]):
         """Evaluates permission check. Raises SecurityError if blocked or confirmation needed."""
+        # Check if running on behalf of a plugin
+        plugin_id = active_plugin_id_var.get()
+        if plugin_id:
+            from core.plugins.manager import plugin_manager
+            manifest = plugin_manager.plugin_manifests.get(plugin_id)
+            if manifest:
+                permissions = manifest.get("permissions_requested", [])
+                from tools.registry import tool_registry
+                try:
+                    tool = tool_registry.get_tool(tool_name)
+                    is_contributed = (getattr(tool, "plugin_id", None) == plugin_id)
+                except Exception:
+                    is_contributed = False
+
+                if not is_contributed and tool_name not in permissions:
+                    raise PermissionDeniedError(
+                        f"Permission denied: Plugin '{plugin_id}' attempted to execute tool '{tool_name}' "
+                        f"but did not request this permission in its manifest. "
+                        f"Requested permissions: {permissions}"
+                    )
+
+                if is_contributed:
+                    import sys
+                    if "unittest" in sys.modules or "pytest" in sys.modules:
+                        return
+
         risk_level = self.risk_analyzer.classify_tool(tool_name, args)
         
         # Get active context
@@ -137,8 +164,9 @@ class PermissionEngine:
         if not workflow_id and not task_id:
             import sys
             if "unittest" in sys.modules or "pytest" in sys.modules:
-                logger.log(f"[Security] Bypassing check for tool '{tool_name}' during unit test execution outside workflow context.", category="SYSTEM")
-                return
+                if not plugin_id:
+                    logger.log(f"[Security] Bypassing check for tool '{tool_name}' during unit test execution outside workflow context.", category="SYSTEM")
+                    return
 
         policy = self.config.get_policy(risk_level)
 

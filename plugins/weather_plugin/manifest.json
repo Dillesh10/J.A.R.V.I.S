@@ -1,0 +1,17 @@
+{
+  "id": "weather_plugin",
+  "name": "Weather Plugin",
+  "version": "1.0.0",
+  "api_version": "v1",
+  "description": "Adds weather commands and info tools.",
+  "author": "J.A.R.V.I.S. Team",
+  "license": "MIT",
+  "category": "Weather",
+  "entry_point": "plugin.py",
+  "permissions_requested": ["read_file"],
+  "supported_platforms": ["windows", "linux", "mac"],
+  "default_configuration": {
+    "default_location": "New York",
+    "temp_scale": "Celsius"
+  }
+}

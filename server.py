@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=open_browser, daemon=True).start()
     yield
     # Shutdown
+    try:
+        from core.plugins.manager import plugin_manager
+        plugin_manager.shutdown_all_plugins()
+    except Exception as e:
+        logger.log(f"[Server] Failed to shutdown plugins: {e}", category="SYSTEM")
     logger.log("Powering down J.A.R.V.I.S. web server. Goodbye, sir.", category="SYSTEM")
 
 app = FastAPI(title="J.A.R.V.I.S. API Server", lifespan=lifespan)

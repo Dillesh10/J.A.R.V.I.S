@@ -128,6 +128,20 @@ def init_db():
                 reason TEXT
             )
         """)
+        # Create plugins registry table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS plugins_registry (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                api_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                load_time REAL,
+                error_message TEXT,
+                manifest TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     # Run safe column migrations
     migrate_db()
@@ -455,3 +469,32 @@ def get_security_metrics() -> dict:
             "failed_security_checks_count": int(failed_checks),
             "cancelled_workflows_count": int(cancelled_wfs)
         }
+
+# Plugins Registry Helpers
+def register_plugin(plugin_id: str, name: str, version: str, api_version: str, status: str, load_time: float, error_message: Optional[str], manifest: str):
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO plugins_registry 
+               (id, name, version, api_version, status, load_time, error_message, manifest, updated_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (plugin_id, name, version, api_version, status, load_time, error_message, manifest)
+        )
+        conn.commit()
+
+def update_plugin_status(plugin_id: str, status: str, error_message: Optional[str] = None):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE plugins_registry SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, error_message, plugin_id)
+        )
+        conn.commit()
+
+def get_plugin(plugin_id: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM plugins_registry WHERE id = ?", (plugin_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_all_registered_plugins() -> list:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM plugins_registry ORDER BY id ASC").fetchall()
+        return [dict(row) for row in rows]

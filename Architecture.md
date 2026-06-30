@@ -89,3 +89,14 @@ To prevent bypass, the `ToolRegistry` intercepts registrations and wraps tool `e
 
 ### Context Propagation (Thread-Local ContextVars)
 Because tasks can run concurrently in parallel layers, thread-local `contextvars` (`active_workflow_id_var` and `active_task_id_var`) propagate active context safely without breaking functional signatures.
+
+---
+
+## 4. Plugin & Extension Architecture
+
+J.A.R.V.I.S. includes a sandboxed, dependency-resolved Plugin and Extension Architecture. This allows third-party integrations to dynamically register:
+- Custom Tools (Universal Tool Framework)
+- Custom Agents (Core Router)
+- Workflow Templates (Planner Decomposer)
+
+For deep technical details, specifications, and development guidelines, refer to the full [Plugin Architecture Guide](file:///e:/J.A.R.V.I.S/PLUGINS.md).

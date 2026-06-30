@@ -63,6 +63,12 @@ def main():
             break
         except Exception as e:
             print(Fore.RED + f"J.A.R.V.I.S.: I seem to have encountered a critical error, sir. Details: {e}")
+            
+    try:
+        from core.plugins.manager import plugin_manager
+        plugin_manager.shutdown_all_plugins()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()

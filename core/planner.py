@@ -205,6 +205,19 @@ class TaskDecomposer:
 
     def decompose(self, goal: str) -> List[Task]:
         """Decomposes a goal into a list of tasks using registered tools."""
+        # Check for matching plugin-contributed workflow templates
+        try:
+            from core.plugins.registry import extension_registry
+            template = extension_registry.get_matching_workflow_template(goal)
+            if template:
+                logger.log(f"[Planner] Found matching plugin workflow template for goal: '{goal}'", category="SYSTEM")
+                tasks = []
+                for t in template.tasks:
+                    tasks.append(Task(**t))
+                return tasks
+        except Exception as e:
+            logger.log(f"[Planner] Failed checking plugin workflow templates: {e}", category="SYSTEM")
+
         tools = tool_registry.list_tools()
         tools_info = []
         for t in tools:

@@ -61,3 +61,15 @@ finally:
     active_workflow_id_var.reset(token_wf)
     active_task_id_var.reset(token_task)
 ```
+
+---
+
+## 4. Developing & Testing Plugins
+
+To build custom tools, agents, or workflow templates for J.A.R.V.I.S. OS:
+1. Follow the manifest guidelines and SDK lifecycle methods outlined in the [Plugins Development Guide](file:///e:/J.A.R.V.I.S/PLUGINS.md).
+2. Place your plugin folder in the `/plugins/` directory.
+3. Test your plugin's lifecycle and sandboxing using the dedicated test suite:
+   ```bash
+   .venv\Scripts\python.exe -m unittest tests/test_plugins.py
+   ```

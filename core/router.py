@@ -89,6 +89,74 @@ class JarvisRouter:
             "Researcher": get_researcher_agent(),
             "Coder": get_coder_agent()
         }
+        self._cached_agents_count = len(self.agents)
+
+        # Load all plugins
+        try:
+            from core.plugins.manager import plugin_manager
+            plugin_manager.load_all_plugins()
+            self._cached_agents_count = len(self.all_agents)
+        except Exception as e:
+            logger.log(f"[Router] Failed to load plugins: {e}", category="SYSTEM")
+
+    @property
+    def all_agents(self) -> dict:
+        from core.plugins.registry import extension_registry
+        merged = self.agents.copy()
+        merged.update(extension_registry.list_agents())
+        return merged
+
+    def get_routing_prompt(self) -> str:
+        agent_descriptions = []
+        for name, agent in self.all_agents.items():
+            desc = getattr(agent, "description", None)
+            if not desc:
+                if name == "Researcher":
+                    desc = "for answering general knowledge questions, finding information on Wikipedia, and summarizing data."
+                elif name == "Coder":
+                    desc = "handles writing, executing, and debugging code; shell/terminal commands; file/folder actions; desktop app opening; browser automation; and YouTube playback."
+                else:
+                    desc = f"Plugin agent: handles dynamic tasks."
+            agent_descriptions.append(f'{len(agent_descriptions)+1}. "{name}" - {desc}')
+            
+        agent_list_str = "\n".join(agent_descriptions)
+        
+        prompt = f"""You are the J.A.R.V.I.S. Core Routing System.
+Your job is to receive the user's input and decide which sub-agent is best suited to handle it, OR handle it yourself.
+You have the following sub-agents:
+{agent_list_str}
+
+You possess the following tools to use DIRECTLY — call them yourself, do not delegate these:
+- look_at_screen: Capture and analyze the user's screen visually
+- store_fact / recall_facts: Long-term memory for storing and recalling information
+- get_current_datetime: Get the current local date and time. ALWAYS use this when the user asks what time or date it is.
+- get_system_info: Get information about the user's computer/OS
+
+If the task requires a sub-agent, you MUST answer in exactly this format and nothing else:
+DELEGATE_TO: [Agent Name]
+(Do not use tools if you are delegating.)
+
+If you are answering the user directly, answer as J.A.R.V.I.S. and always end with "sir".
+"""
+        return prompt
+
+    def _update_gemini_model(self):
+        if GEMINI_KEY and GEMINI_KEY != "your_gemini_api_key_here":
+            try:
+                router_tools = []
+                for tool_name in ["look_at_screen", "store_fact", "recall_facts", "get_current_datetime", "get_system_info"]:
+                    try:
+                        router_tools.append(tool_registry.get_tool(tool_name).execute)
+                    except Exception:
+                        pass
+                self.gemini_model = genai.GenerativeModel(
+                    model_name="gemini-1.5-flash",
+                    system_instruction=self.get_routing_prompt(),
+                    tools=router_tools if router_tools else None
+                )
+                self.gemini_chat = self.gemini_model.start_chat(enable_automatic_function_calling=True)
+            except Exception as e:
+                logger.log(f"[Router] Failed to update Gemini model instruction: {e}", category="SYSTEM")
 
     def process_input(self, user_input: str, session_id: str = "default") -> str:
         """
@@ -107,6 +175,13 @@ class JarvisRouter:
     def _process_input_core(self, user_input: str, session_id: str) -> str:
         """Core routing implementation containing fallback logic and tool executing loops."""
         logger.log(f"Received user input: '{user_input}' (session: {session_id})", category="ROUTER")
+        
+        # Check if new agents registered via plugins
+        all_ags = self.all_agents
+        if len(all_ags) != self._cached_agents_count:
+            self._cached_agents_count = len(all_ags)
+            self._update_gemini_model()
+
         # Shortcut for real-time time/date queries to ensure 100% reliable local responses
         tz_name = user_timezone_var.get()
         try:
@@ -224,7 +299,7 @@ class JarvisRouter:
                 import memory.database as db
                 history = db.get_chat_history(session_id, limit=10)
                 
-                messages = [{"role": "system", "content": ROUTER_PROMPT}]
+                messages = [{"role": "system", "content": self.get_routing_prompt()}]
                 for msg in history:
                     role = msg["role"]
                     if role == "YOU":
@@ -327,8 +402,9 @@ class JarvisRouter:
             elif "Researcher" in agent_name:
                 agent_name = "Researcher"
 
-            if agent_name in self.agents:
-                agent = self.agents[agent_name]
+            all_ags = self.all_agents
+            if agent_name in all_ags:
+                agent = all_ags[agent_name]
                 logger.log(f"Delegating task to the {agent_name} sub-system...", category="ROUTER")
                 res = agent.process_message(user_input, session_id)
                 logger.log(f"Task completed by {agent_name}.", category="ROUTER")
