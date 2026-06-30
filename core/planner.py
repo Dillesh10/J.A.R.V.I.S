@@ -327,7 +327,7 @@ class TaskGraph:
         self.tasks: Dict[str, Task] = {t.id: t for t in tasks}
 
     def get_topological_sort(self) -> List[str]:
-        """Performs topological sort using Kahn's algorithm to resolve dependencies."""
+        """Performs topological sort using Kahn's algorithm, raising ValueError if cycles exist."""
         in_degree = {t_id: 0 for t_id in self.tasks}
         adj_list = {t_id: [] for t_id in self.tasks}
 
@@ -337,6 +337,7 @@ class TaskGraph:
                     adj_list[dep].append(t_id)
                     in_degree[t_id] += 1
 
+        # Deterministic sorting queue: sort by priority (descending), then ID (lexicographically)
         queue = [t_id for t_id, degree in in_degree.items() if degree == 0]
         queue.sort(key=lambda x: (-self.tasks[x].priority, x))
         
@@ -353,11 +354,14 @@ class TaskGraph:
             queue.sort(key=lambda x: (-self.tasks[x].priority, x))
 
         if len(order) != len(self.tasks):
-            logger.log("[Planner Warning] Dependency cycle detected in tasks graph!", category="SYSTEM")
+            raise ValueError("Dependency cycle detected in task graph! Cyclic graphs are rejected.")
         return order
 
     def get_parallel_layers(self) -> List[List[str]]:
         """Groups tasks into layers that can be executed in parallel based on dependencies."""
+        # Validate that cycles do not exist
+        self.get_topological_sort()
+        
         in_degree = {t_id: 0 for t_id in self.tasks}
         adj_list = {t_id: [] for t_id in self.tasks}
 
@@ -383,6 +387,83 @@ class TaskGraph:
             current_layer = next_layer
             
         return layers
+
+    def calculate_cpm(self) -> Dict[str, Any]:
+        """
+        Performs Critical Path Method calculations to determine total workflow duration,
+        slack times, the critical path sequence, and identify bottlenecks.
+        """
+        topo_order = self.get_topological_sort()
+        
+        # 1. Forward Pass (ES & EF)
+        es = {t_id: 0.0 for t_id in self.tasks}
+        ef = {}
+        
+        adj_list = {t_id: [] for t_id in self.tasks}
+        parents = {t_id: [] for t_id in self.tasks}
+        for t_id, task in self.tasks.items():
+            for dep in task.dependencies:
+                if dep in self.tasks:
+                    adj_list[dep].append(t_id)
+                    parents[t_id].append(dep)
+                    
+        for t_id in topo_order:
+            task = self.tasks[t_id]
+            dur = getattr(task, 'estimated_duration', 5.0)
+            if parents[t_id]:
+                es[t_id] = max(ef[p_id] for p_id in parents[t_id])
+            else:
+                es[t_id] = 0.0
+            ef[t_id] = es[t_id] + dur
+            
+        total_duration = max(ef.values()) if ef else 0.0
+        
+        # 2. Backward Pass (LS & LF)
+        lf = {t_id: total_duration for t_id in self.tasks}
+        ls = {}
+        
+        for t_id in reversed(topo_order):
+            task = self.tasks[t_id]
+            dur = getattr(task, 'estimated_duration', 5.0)
+            if adj_list[t_id]:
+                lf[t_id] = min(ls[c_id] for c_id in adj_list[t_id])
+            ls[t_id] = lf[t_id] - dur
+            
+        # 3. Slack Calculation
+        slack = {}
+        critical_path = []
+        for t_id in topo_order:
+            slack[t_id] = ls[t_id] - es[t_id]
+            if abs(slack[t_id]) < 1e-9:
+                critical_path.append(t_id)
+                
+        # 4. Bottleneck Analysis
+        max_dur = 0.0
+        bottlenecks = []
+        for t_id in critical_path:
+            dur = getattr(self.tasks[t_id], 'estimated_duration', 5.0)
+            if dur > max_dur:
+                max_dur = dur
+                bottlenecks = [t_id]
+            elif dur == max_dur and dur > 0:
+                bottlenecks.append(t_id)
+                
+        node_details = {}
+        for t_id in self.tasks:
+            node_details[t_id] = {
+                "es": es[t_id],
+                "ef": ef[t_id],
+                "ls": ls[t_id],
+                "lf": lf[t_id],
+                "slack": slack[t_id]
+            }
+            
+        return {
+            "duration": total_duration,
+            "critical_path": critical_path,
+            "bottlenecks": bottlenecks,
+            "nodes": node_details
+        }
 
 # ─── VERIFICATION ENGINE ──────────────────────────────────────────────────────
 

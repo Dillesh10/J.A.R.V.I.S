@@ -37,7 +37,12 @@ def notify_status_update(context: ExecutionContext, current_stage: str = "Runnin
         "current_step_idx": context.current_step_idx,
         "total_steps": len(context.plan),
         "plan": [step.model_dump() for step in context.plan],
-        "goal_analysis": context.goal_analysis.model_dump() if context.goal_analysis else None
+        "goal_analysis": context.goal_analysis.model_dump() if context.goal_analysis else None,
+        "dag_nodes": context.dag_nodes,
+        "dag_edges": context.dag_edges,
+        "execution_stages": context.execution_stages,
+        "critical_path": context.critical_path,
+        "estimated_workflow_duration": context.estimated_workflow_duration
     }
     for cb in _status_callbacks:
         try:
@@ -134,9 +139,48 @@ class IntelligenceOrchestrator:
             context.status = "FAILED"
             notify_status_update(context, current_stage="Planning Failed")
             return f"I planned a workflow for '{context.goal}', but was unable to decompose it, sir."
+            
+        # Build TaskGraph and validate DAG properties
+        from core.planner import TaskGraph
+        try:
+            graph = TaskGraph(tasks)
+            # Run topological sort to validate cycles
+            topo_order = graph.get_topological_sort()
+            # Calculate CPM
+            cpm_metrics = graph.calculate_cpm()
+            
+            context.execution_stages = graph.get_parallel_layers()
+            context.critical_path = cpm_metrics["critical_path"]
+            context.estimated_workflow_duration = cpm_metrics["duration"]
+            
+            # Populate nodes details
+            context.dag_nodes = {}
+            for t in tasks:
+                context.dag_nodes[t.id] = {
+                    "id": t.id,
+                    "duration": getattr(t, 'estimated_duration', 5.0),
+                    "slack": cpm_metrics["nodes"][t.id]["slack"],
+                    "status": "PENDING",
+                    "agent": self.agent_manager.resolve_agent(t.assigned_agent),
+                    "tools": getattr(t, 'assigned_tools', [t.assigned_tool])
+                }
+                
+            # Populate edges
+            edges = []
+            for t in tasks:
+                for dep in t.dependencies:
+                    edges.append([dep, t.id])
+            context.dag_edges = edges
+            
+        except ValueError as ve:
+            context.status = "FAILED"
+            context.errors.append(str(ve))
+            notify_status_update(context, current_stage="DAG Validation Failed")
+            return f"Invalid dependency graph: {str(ve)}"
 
         # Register execution steps in Context
-        for t in tasks:
+        ordered_tasks = [graph.tasks[t_id] for t_id in topo_order]
+        for t in ordered_tasks:
             step = ExecutionStep(
                 id=t.id,
                 description=t.description,
@@ -182,6 +226,8 @@ class IntelligenceOrchestrator:
             context.current_step_idx = idx
             context.active_agent = step.assigned_agent
             step.status = "RUNNING"
+            if step.id in context.dag_nodes:
+                context.dag_nodes[step.id]["status"] = "RUNNING"
             db.update_workflow_task(step.id, "RUNNING")
             
             logger.log(f"[Orchestrator] Running step {idx+1}/{len(context.plan)}: '{step.description}' using '{step.assigned_agent}'...", category="SYSTEM")
@@ -193,6 +239,8 @@ class IntelligenceOrchestrator:
             if tool_res["success"]:
                 step.status = "COMPLETED"
                 step.result = tool_res["result"]
+                if step.id in context.dag_nodes:
+                    context.dag_nodes[step.id]["status"] = "COMPLETED"
                 db.update_workflow_task(step.id, "COMPLETED", actual_result=tool_res["result"])
             else:
                 # Retry logic
@@ -205,10 +253,14 @@ class IntelligenceOrchestrator:
                 if retry_res["success"]:
                     step.status = "COMPLETED"
                     step.result = retry_res["result"]
+                    if step.id in context.dag_nodes:
+                        context.dag_nodes[step.id]["status"] = "COMPLETED"
                     db.update_workflow_task(step.id, "COMPLETED", actual_result=retry_res["result"])
                 else:
                     step.status = "FAILED"
                     step.error = retry_res["error"]
+                    if step.id in context.dag_nodes:
+                        context.dag_nodes[step.id]["status"] = "FAILED"
                     context.errors.append(retry_res["error"])
                     db.update_workflow_task(step.id, "FAILED", error_message=retry_res["error"])
                     context.status = "FAILED"

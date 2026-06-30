@@ -46,6 +46,11 @@ class ExecutionContext(BaseModel):
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED, INTERRUPTED
     memory_references: List[str] = []
     errors: List[str] = []
+    dag_nodes: Dict[str, Dict[str, Any]] = {}
+    dag_edges: List[List[str]] = []
+    execution_stages: List[List[str]] = []
+    critical_path: List[str] = []
+    estimated_workflow_duration: float = 0.0
     created_at: str = Field(default_factory=lambda: datetime.datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.datetime.now().isoformat())
 
