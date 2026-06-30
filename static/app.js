@@ -22,6 +22,7 @@ const statOsEl = document.getElementById('stat-os');
 const statHostnameEl = document.getElementById('stat-hostname');
 const statHardwareEl = document.getElementById('stat-hardware');
 const statTimezoneEl = document.getElementById('stat-timezone');
+const statProviderEl = document.getElementById('stat-provider');
 const statUptimeEl = document.getElementById('stat-uptime');
 const memoryListEl = document.getElementById('memory-list');
 const logTerminalEl = document.getElementById('log-terminal');
@@ -516,6 +517,22 @@ async function pollMemory() {
 }
 setInterval(pollMemory, 3000);
 pollMemory(); // Run immediately
+
+async function pollProviderStatus() {
+    try {
+        const res = await fetch('/api/providers/status');
+        const data = await res.json();
+        if (data && data.active_provider) {
+            statProviderEl.textContent = data.active_provider;
+        } else {
+            statProviderEl.textContent = "UNKNOWN";
+        }
+    } catch (err) {
+        console.warn("Provider status polling error:", err);
+    }
+}
+setInterval(pollProviderStatus, 3000);
+pollProviderStatus(); // Run immediately
 
 function updateActiveAgentsFromLog(log) {
     const msg = log.message.toLowerCase();

@@ -16,6 +16,7 @@ class ProviderManager:
         ProviderFactory.register_default_providers()
         self.health_monitor = ProviderHealthMonitor()
         self._initialized_providers = set()
+        self.last_active_provider = "openrouter"
 
     def _get_provider_instance(self, provider_name: str) -> Any:
         provider_name = provider_name.lower().strip()
@@ -98,7 +99,7 @@ class ProviderManager:
                 # Store statistics in SQLite
                 total_tokens = res.input_tokens + res.output_tokens
                 self._log_metrics_to_db(prov_name, res.model, total_tokens, duration, res.cost, True)
-                
+                self.last_active_provider = prov_name
                 return res
 
             except Exception as e:
@@ -149,6 +150,7 @@ class ProviderManager:
                 self.health_monitor.record_success(prov_name, duration)
                 total_tokens = res.input_tokens + res.output_tokens
                 self._log_metrics_to_db(prov_name, res.model, total_tokens, duration, res.cost, True)
+                self.last_active_provider = prov_name
                 return res
                 
             except Exception as e:

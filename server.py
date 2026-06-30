@@ -177,6 +177,14 @@ async def get_memory():
         return {"facts": ["No shared facts available."]}
     return {"facts": facts}
 
+@app.get("/api/providers/status")
+async def get_providers_status():
+    from core.providers import provider_manager
+    return {
+        "active_provider": provider_manager.last_active_provider,
+        "statuses": provider_manager.health_check()
+    }
+
 @app.get("/api/logs")
 async def get_logs():
     # Fetch logs since last poll and clear them

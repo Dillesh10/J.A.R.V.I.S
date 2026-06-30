@@ -17,10 +17,10 @@ class ProviderConfiguration:
         default_config = {
             "providers": {
                 "gemini": {
-                    "api_key": os.getenv("GEMINI_API_KEY", "your_gemini_api_key_here"),
+                    "api_key": os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "your_gemini_api_key_here",
                     "base_url": "",
                     "model_name": "gemini-1.5-flash",
-                    "timeout": 30,
+                    "timeout": 10,
                     "retries": 3,
                     "temperature": 0.7,
                     "max_tokens": 4096
@@ -29,7 +29,7 @@ class ProviderConfiguration:
                     "api_key": os.getenv("OPENAI_API_KEY", ""),
                     "base_url": "",
                     "model_name": "gpt-4o-mini",
-                    "timeout": 30,
+                    "timeout": 10,
                     "retries": 3,
                     "temperature": 0.7,
                     "max_tokens": 4096
@@ -38,7 +38,7 @@ class ProviderConfiguration:
                     "api_key": os.getenv("OPENROUTER_API_KEY", ""),
                     "base_url": "https://openrouter.ai/api/v1",
                     "model_name": "meta-llama/llama-3.3-70b-instruct:free",
-                    "timeout": 30,
+                    "timeout": 10,
                     "retries": 3,
                     "temperature": 0.7,
                     "max_tokens": 4096
@@ -111,6 +111,8 @@ class ProviderConfiguration:
             if prov == "claude":
                 env_key = "ANTHROPIC_API_KEY"
             val = os.getenv(env_key)
+            if not val and prov == "gemini":
+                val = os.getenv("GOOGLE_API_KEY")
             if val and val != f"your_{prov}_api_key_here":
                 self.data["providers"][prov]["api_key"] = val
         

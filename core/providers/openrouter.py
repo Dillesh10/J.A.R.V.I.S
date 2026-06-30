@@ -25,6 +25,7 @@ class OpenRouterProvider(OpenAIProvider):
             api_key=api_key_to_use,
             base_url=self.base_url,
             timeout=self.timeout,
+            max_retries=0,
             default_headers={
                 "HTTP-Referer": "https://github.com/google-gemini",
                 "X-Title": "J.A.R.V.I.S. OS",
