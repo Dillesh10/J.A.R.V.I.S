@@ -99,3 +99,11 @@ Whenever `notify_status_update(context)` is called in the orchestrator, it trigg
 
 ### Execution Logs
 Orchestration steps and tool execution times are logged automatically under the `SYSTEM` category. View these live in the console or inspect SQLite `provider_metrics` and `workflow_tasks` logs.
+
+---
+
+## 6. Sprint 11: Cognitive Planner Guidelines
+When developing tools or agents:
+* **Task Decomposition**: Ensure tasks return their `estimated_duration` (float), `assigned_tools` (list of strings), and specify a valid `retry_policy` (RetryPolicy Pydantic model).
+* **Goal Analysis**: Access `context.goal_analysis` to inspect objectives, constraints, resources, and risk levels within custom agents or workflow templates.
+

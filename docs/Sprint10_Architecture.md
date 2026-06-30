@@ -220,3 +220,9 @@ class IntelligenceOrchestrator:
 ## 9. Future Scalability Considerations
 * **Sub-Orchestration**: The architecture allows spawning child orchestrators for sub-goals.
 * **Pluggable Agents**: Adding a new agent only requires registering it in `AgentManager`. No modification of the main orchestrator code is needed.
+
+---
+
+## 10. Sprint 11 Additions: Cognitive Planning Engine (Sprint 11.1)
+The planning engine now integrates a detailed `GoalAnalysis` phase prior to task decomposition. Tasks include reasoning metadata (`estimated_duration`, `assigned_tools`, `retry_policy`), laying the foundation for topological DAG scheduling in Sprint 11.2.
+
