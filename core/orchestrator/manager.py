@@ -36,7 +36,8 @@ def notify_status_update(context: ExecutionContext, current_stage: str = "Runnin
         "running_tool": running_tool,
         "current_step_idx": context.current_step_idx,
         "total_steps": len(context.plan),
-        "plan": [step.model_dump() for step in context.plan]
+        "plan": [step.model_dump() for step in context.plan],
+        "goal_analysis": context.goal_analysis.model_dump() if context.goal_analysis else None
     }
     for cb in _status_callbacks:
         try:
@@ -65,13 +66,38 @@ class IntelligenceOrchestrator:
         
         logger.log(f"[Orchestrator] Classified Intent: '{intent}' (Confidence: {confidence * 100:.1f}%)", category="SYSTEM")
         
+        # 1.5 Cognitive Goal Analysis
+        from core.planner import GoalAnalyzer
+        from core.brain import UnifiedBrain
+        from core.orchestrator.context import GoalAnalysis
+        
+        planner_brain = UnifiedBrain(
+            name="Planner_Core",
+            system_instruction="You are the J.A.R.V.I.S. Core Brain. Help plan tasks."
+        )
+        analyzer = GoalAnalyzer(planner_brain)
+        analysis_data = analyzer.analyze_goal(query)
+        
+        goal_analysis = GoalAnalysis(
+            primary_objective=analysis_data.get("primary_objective", query),
+            secondary_objectives=analysis_data.get("secondary_objectives", []),
+            constraints=analysis_data.get("constraints", []),
+            required_resources=analysis_data.get("required_resources", []),
+            required_tools=analysis_data.get("required_tools", []),
+            required_agents=analysis_data.get("required_agents", []),
+            expected_outputs=analysis_data.get("expected_outputs", []),
+            risk_level=analysis_data.get("risk_level", "LOW"),
+            estimated_complexity=analysis_data.get("estimated_complexity", "MEDIUM")
+        )
+        
         # 2. Build Execution Context
         context = ExecutionContext(
             session_id=session_id,
             goal=query,
             intent=intent,
             confidence_score=confidence,
-            active_provider=provider_manager.last_active_provider
+            active_provider=provider_manager.last_active_provider,
+            goal_analysis=goal_analysis
         )
         context.status = "RUNNING"
         
@@ -117,7 +143,10 @@ class IntelligenceOrchestrator:
                 assigned_agent=self.agent_manager.resolve_agent(t.assigned_agent),
                 assigned_tool=t.assigned_tool,
                 args=t.args,
-                status="PENDING"
+                status="PENDING",
+                estimated_duration=getattr(t, 'estimated_duration', 5.0),
+                assigned_tools=getattr(t, 'assigned_tools', []),
+                retry_policy=getattr(t, 'retry_policy', None) or RetryPolicy()
             )
             context.plan.append(step)
 

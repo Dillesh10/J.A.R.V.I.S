@@ -12,6 +12,8 @@ from core.brain import UnifiedBrain
 
 # ─── PLANNER MODELS ──────────────────────────────────────────────────────────
 
+from core.orchestrator.context import RetryPolicy
+
 class Task(BaseModel):
     id: str = Field(description="Unique identifier for this task (e.g., 'create_dir').")
     description: str = Field(description="Human-readable description of what this task does.")
@@ -26,6 +28,9 @@ class Task(BaseModel):
     actual_result: Optional[str] = Field(default=None, description="Collected tool execution result.")
     error_message: Optional[str] = Field(default=None, description="Error details if task execution failed.")
     verification_rule: Optional[str] = Field(default=None, description="Rule to verify success (e.g. 'file_exists', 'directory_exists', 'process_running', 'exit_code_zero').")
+    estimated_duration: float = Field(default=5.0, description="Estimated task execution time in seconds.")
+    assigned_tools: List[str] = Field(default=[], description="List of all tools potentially needed for this task.")
+    retry_policy: RetryPolicy = Field(default_factory=RetryPolicy, description="Retry rules.")
     
     # Future Cost Tracking Hooks (optional placeholders)
     provider: Optional[str] = Field(default=None)
@@ -113,27 +118,31 @@ class GoalAnalyzer:
         self.brain = brain
 
     def analyze_goal(self, query: str) -> Dict[str, Any]:
-        """Performs detailed goal analysis before task decomposition."""
+        """Performs detailed cognitive goal analysis before task decomposition."""
         prompt = f"""
         Analyze the user's workflow goal: "{query}"
         Determine the following details:
-        1. Goal description.
-        2. Constraints (if any).
-        3. External Dependencies (e.g. node.js, python, git).
-        4. Complexity (Low, Medium, High).
-        5. Estimated execution time (e.g. "60s").
-        6. Expected outputs (list of files, folders, or actions).
-        7. Risk level (Low, Medium, High - based on security or system modifications).
+        1. Primary Objective: Main high-level outcome.
+        2. Secondary Objectives: List of sub-outcomes or tasks needed.
+        3. Constraints (if any).
+        4. Required resources: What files/directories/configurations are needed before starting.
+        5. Required tools: List of tools likely needed.
+        6. Required agents: List of agents likely needed.
+        7. Expected outputs: List of files, folders, or actions generated.
+        8. Risk level: LOW, MEDIUM, HIGH, CRITICAL.
+        9. Estimated complexity: LOW, MEDIUM, HIGH.
 
         Respond ONLY in the following JSON format:
         {{
-            "goal": "string",
+            "primary_objective": "string",
+            "secondary_objectives": ["string"],
             "constraints": ["string"],
-            "dependencies": ["string"],
-            "complexity": "Low" or "Medium" or "High",
-            "estimated_time": "string",
+            "required_resources": ["string"],
+            "required_tools": ["string"],
+            "required_agents": ["string"],
             "expected_outputs": ["string"],
-            "risk_level": "Low" or "Medium" or "High"
+            "risk_level": "LOW" or "MEDIUM" or "HIGH" or "CRITICAL",
+            "estimated_complexity": "LOW" or "MEDIUM" or "HIGH"
         }}
         """
         try:
@@ -145,13 +154,15 @@ class GoalAnalyzer:
             logger.log(f"[Planner] Goal analysis failed, falling back to default: {e}", category="SYSTEM")
         
         return {
-            "goal": query,
+            "primary_objective": query,
+            "secondary_objectives": [],
             "constraints": [],
-            "dependencies": [],
-            "complexity": "Medium",
-            "estimated_time": "30s",
+            "required_resources": [],
+            "required_tools": [],
+            "required_agents": [],
             "expected_outputs": [],
-            "risk_level": "Low"
+            "risk_level": "LOW",
+            "estimated_complexity": "MEDIUM"
         }
 
 # ─── CONFIDENCE ENGINE ────────────────────────────────────────────────────────
@@ -268,7 +279,13 @@ class TaskDecomposer:
                 "assigned_tool": "create_folder",
                 "args": {{"folder_name": "portfolio"}},
                 "expected_result": "Folder created successfully",
-                "verification_rule": "directory_exists"
+                "verification_rule": "directory_exists",
+                "estimated_duration": 5.0,
+                "assigned_tools": ["create_folder"],
+                "retry_policy": {{
+                    "max_retries": 3,
+                    "backoff_factor": 1.5
+                }}
             }},
             {{
                 "id": "task_id_2",
@@ -279,7 +296,13 @@ class TaskDecomposer:
                 "assigned_tool": "create_file",
                 "args": {{"file_name": "portfolio/index.html", "content": "<h1>Hello</h1>"}},
                 "expected_result": "File index.html created",
-                "verification_rule": "file_exists"
+                "verification_rule": "file_exists",
+                "estimated_duration": 8.0,
+                "assigned_tools": ["create_file"],
+                "retry_policy": {{
+                    "max_retries": 3,
+                    "backoff_factor": 1.5
+                }}
             }}
         ]
         """
