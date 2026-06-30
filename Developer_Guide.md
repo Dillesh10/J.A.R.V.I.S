@@ -73,3 +73,71 @@ To build custom tools, agents, or workflow templates for J.A.R.V.I.S. OS:
    ```bash
    .venv\Scripts\python.exe -m unittest tests/test_plugins.py
    ```
+
+---
+
+## 5. Utilizing the AI Provider Abstraction Layer
+
+When developing new features, agents, or plugins that require LLM completions, vision capabilities, or embedding generation, do NOT instantiate client libraries (e.g. OpenAI or Gemini SDKs) directly. Instead, import and query the centralized `provider_manager`.
+
+### Basic Conversational Invocation
+```python
+from core.providers import provider_manager
+
+messages = [
+    {"role": "user", "content": "Analyze this code structure."}
+]
+
+# The manager handles model selection, system instructions, and routing automatically
+response = provider_manager.chat(
+    messages=messages,
+    task_type="coding"
+)
+print(response.content)
+```
+
+### Vision Processing
+```python
+from core.providers import provider_manager
+
+response = provider_manager.vision(
+    image_data="temp_image.png",
+    prompt="Read the text inside this image."
+)
+print(response.content)
+```
+
+### Exception Handling
+All exceptions are mapped to a standardized provider hierarchy under `core.providers.exceptions`. Always handle unified errors:
+```python
+from core.providers.exceptions import AuthenticationError, RateLimitError, ProviderUnavailable
+
+try:
+    response = provider_manager.chat(messages=messages)
+except RateLimitError:
+    # Handle rate-limiting gracefully (e.g., exponential backoff)
+    pass
+except ProviderUnavailable:
+    # Handle entire cloud cluster offline
+    pass
+```
+
+### Testing Provider Integrations
+Use the dedicated provider test suite to run diagnostics and confirm correct exception mappings:
+```bash
+.venv\Scripts\python.exe -m unittest tests/test_providers.py
+```
+
+---
+
+## 6. Developing & Testing Voice Intelligence
+
+When extending J.A.R.V.I.S. with voice interfaces:
+1. Refer to the complete manifest guidelines in [VOICE.md](file:///e:/J.A.R.V.I.S/VOICE.md).
+2. Invoke Speech-to-Text and Text-to-Speech via the unified provider wrappers:
+   - STT: `provider_manager.stt(audio_file_path)`
+   - TTS: `provider_manager.tts_speak(text)`
+3. Run the voice unit test suite locally to verify pipeline components and mock spoken permissions:
+   ```bash
+   .venv\Scripts\python.exe -m unittest tests/test_voice.py
+   ```

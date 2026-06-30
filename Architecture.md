@@ -72,7 +72,33 @@ Memory (UnifiedBrain facts database & context learning)
 
 ---
 
-## 3. Design Patterns Applied
+## 3. AI Provider Abstraction Layer
+
+To ensure resilient and model-agnostic AI capabilities, J.A.R.V.I.S. implements a unified AI Provider Abstraction Layer. This layer isolates core agent execution, planning, and vision logic from provider-specific SDK interfaces.
+
+```
++---------------------------------------------------------+
+|                  Agent / Router / Planner               |
++---------------------------+-----------------------------+
+                            | (Unified Prompt/Tools)
+                            v
++---------------------------------------------------------+
+|                    ProviderManager                      |
++---------------------+-----------+-----------+-----------+
+                      |           |           |
+                      v           v           v
+                 [OpenRouter]  [Gemini]   [OpenAI]  [Ollama]
+```
+
+Key features of this architecture:
+- **Centralized Routing**: Directs different tasks (e.g. coding, vision, embeddings) to the most cost-effective and capable models.
+- **Failover Cascading**: Automatically intercepts transient service outages, rate limits, and authentication errors to re-route queries down a configurable fallback pipeline.
+- **Unified Interface**: Translates tool specifications and message history structures dynamically between OpenAI schemas and Gemini-specific API requirements.
+- **Health diagnostics**: Exposes status metrics and tracks moving average latencies for all endpoints.
+
+---
+
+## 4. Design Patterns Applied
 
 ### Policy-Based Authorization
 Permissions are loaded dynamically from `security_config.json`. Policies map risk levels (LOW, MEDIUM, HIGH, CRITICAL) to authorization strategies (`ALLOW`, `REQUIRE_CONFIRMATION`, `DENY`).
@@ -92,7 +118,7 @@ Because tasks can run concurrently in parallel layers, thread-local `contextvars
 
 ---
 
-## 4. Plugin & Extension Architecture
+## 5. Plugin & Extension Architecture
 
 J.A.R.V.I.S. includes a sandboxed, dependency-resolved Plugin and Extension Architecture. This allows third-party integrations to dynamically register:
 - Custom Tools (Universal Tool Framework)
@@ -100,3 +126,11 @@ J.A.R.V.I.S. includes a sandboxed, dependency-resolved Plugin and Extension Arch
 - Workflow Templates (Planner Decomposer)
 
 For deep technical details, specifications, and development guidelines, refer to the full [Plugin Architecture Guide](file:///e:/J.A.R.V.I.S/PLUGINS.md).
+
+---
+
+## 6. Voice Intelligence Layer
+
+The Voice Intelligence Layer allows J.A.R.V.I.S. to operate as a real-time hands-free assistant. It is a parallel input/output interface to the core routing engine.
+
+For complete details, wake-word matching guidelines, audio pipeline specifications, and local/cloud provider listings, refer to the full [Voice Architecture Guide](file:///e:/J.A.R.V.I.S/VOICE.md).

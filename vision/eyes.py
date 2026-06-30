@@ -1,9 +1,8 @@
 import os
-import google.generativeai as genai  # type: ignore
 from dotenv import load_dotenv  # type: ignore
 
 def look_at_screen() -> str:
-    """Takes a screenshot of the user's screen, analyzes it using Gemini Vision, and returns a detailed text description of what is currently visible."""
+    """Takes a screenshot of the user's screen, analyzes it using the central vision provider, and returns a detailed text description."""
     try:
         import mss  # type: ignore
         from PIL import Image  # type: ignore
@@ -20,30 +19,20 @@ def look_at_screen() -> str:
             img_path = "temp_screen.png"
             img.save(img_path)
             
-            # Analyze with Gemini
-            load_dotenv()
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                return "Error: Cannot see. GEMINI_API_KEY is missing."
-            genai.configure(api_key=api_key)
+            from core.providers import provider_manager
+            prompt = "You are J.A.R.V.I.S's ocular sensor. Describe in precise detail everything visible on this screen. Mention application names, visible text, layout, and overall context."
             
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            
-            # Upload image to Gemini
-            image_file = genai.upload_file(img_path)
-            response = model.generate_content([
-                image_file, 
-                "You are J.A.R.V.I.S's ocular sensor. Describe in precise detail everything visible on this screen. Mention application names, visible text, layout, and overall context."
-            ])
+            # Call vision via ProviderManager
+            response = provider_manager.vision(
+                image_data=img_path,
+                prompt=prompt
+            )
             
             # Cleanup
-            os.remove(img_path)
-            try:
-                genai.delete_file(image_file.name)
-            except Exception:
-                pass
-            
-            return f"Current Screen Contents:\n{response.text}"
+            if os.path.exists(img_path):
+                os.remove(img_path)
+                
+            return f"Current Screen Contents:\n{response.content}"
             
     except Exception as e:
         return f"Error capturing or analyzing screen visually: {str(e)}"

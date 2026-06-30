@@ -1,6 +1,4 @@
 import os
-from openai import OpenAI  # type: ignore
-import google.generativeai as genai  # type: ignore
 from dotenv import load_dotenv  # type: ignore
 from agents.researcher import get_researcher_agent
 from agents.coder import get_coder_agent
@@ -14,9 +12,6 @@ user_timezone_var = contextvars.ContextVar("user_timezone", default="UTC")
 
 # Load environment variables
 load_dotenv()
-
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 ROUTER_PROMPT = """
 You are the J.A.R.V.I.S. Core Routing System.
@@ -48,43 +43,6 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
 
 class JarvisRouter:
     def __init__(self):
-        # OpenRouter Client (Primary for basic routing to avoid limits)
-        self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_KEY,
-            default_headers={
-                "HTTP-Referer": "https://github.com/google-gemini",
-                "X-Title": "J.A.R.V.I.S. Core Router",
-            }
-        )
-        # Confirmed Free Model on OpenRouter - Using the dynamic router for auto-selection
-        self.primary_model = "openrouter/free"
-        self.fallback_models = [
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "google/gemma-3-27b-it:free",
-            "nousresearch/hermes-3-llama-3.1-405b:free"
-        ]
-
-        if GEMINI_KEY and GEMINI_KEY != "your_gemini_api_key_here":
-            genai.configure(api_key=GEMINI_KEY)
-            discover_tools()
-            router_tools = []
-            for tool_name in ["look_at_screen", "store_fact", "recall_facts", "get_current_datetime", "get_system_info"]:
-                try:
-                    router_tools.append(tool_registry.get_tool(tool_name).execute)
-                except Exception as e:
-                    logger.log(f"[Router] Failed to load tool '{tool_name}' for Gemini: {e}", category="SYSTEM")
-                    
-            self.gemini_model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                system_instruction=ROUTER_PROMPT,
-                tools=router_tools if router_tools else None
-            )
-            self.gemini_chat = self.gemini_model.start_chat(enable_automatic_function_calling=True)
-        else:
-            self.gemini_chat = None
-            logger.log("GEMINI_API_KEY not found. Vision and Core Tools will be disabled.", category="SYSTEM")
-        
         self.agents = {
             "Researcher": get_researcher_agent(),
             "Coder": get_coder_agent()
@@ -140,24 +98,6 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
 """
         return prompt
 
-    def _update_gemini_model(self):
-        if GEMINI_KEY and GEMINI_KEY != "your_gemini_api_key_here":
-            try:
-                router_tools = []
-                for tool_name in ["look_at_screen", "store_fact", "recall_facts", "get_current_datetime", "get_system_info"]:
-                    try:
-                        router_tools.append(tool_registry.get_tool(tool_name).execute)
-                    except Exception:
-                        pass
-                self.gemini_model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
-                    system_instruction=self.get_routing_prompt(),
-                    tools=router_tools if router_tools else None
-                )
-                self.gemini_chat = self.gemini_model.start_chat(enable_automatic_function_calling=True)
-            except Exception as e:
-                logger.log(f"[Router] Failed to update Gemini model instruction: {e}", category="SYSTEM")
-
     def process_input(self, user_input: str, session_id: str = "default") -> str:
         """
         Public entry point that handles user input routing and automatically
@@ -180,7 +120,6 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
         all_ags = self.all_agents
         if len(all_ags) != self._cached_agents_count:
             self._cached_agents_count = len(all_ags)
-            self._update_gemini_model()
 
         # Shortcut for real-time time/date queries to ensure 100% reliable local responses
         tz_name = user_timezone_var.get()
@@ -201,16 +140,6 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
         # 1. Simple Case: Is it a vision request? "What am I looking at?"
         vision_keywords = ["screen", "looking at", "see", "visible", "read this"]
         is_vision_request = any(key in user_input.lower() for key in vision_keywords)
-
-        if is_vision_request and self.gemini_chat:
-            logger.log("Vision/Screen request detected. Using Gemini Flash...", category="ROUTER")
-            try:
-                response_text = self.gemini_chat.send_message(user_input).text
-                logger.log("Gemini Flash vision response received.", category="ROUTER")
-                return response_text
-            except Exception as e:
-                logger.log(f"Vision routing error: {e}", category="ROUTER")
-                return f"[Vision Error]: {str(e)}"
 
         # Shortcut for Auditing, Resuming, or Repeating Workflows/Commands
         if "resume" in lower_input and "workflow" in lower_input:
@@ -291,97 +220,81 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
         except Exception as e:
             logger.log(f"[Router] Workflow analyzer or execution failed: {e}", category="ROUTER")
 
-        # 3. General Case: Try OpenRouter (Unlimited Brain)
-        router_response = ""
-        for attempt, model in enumerate([self.primary_model] + self.fallback_models):
-            try:
-                logger.log(f"Routing query using model {model}...", category="BRAIN")
-                import memory.database as db
-                history = db.get_chat_history(session_id, limit=10)
-                
-                messages = [{"role": "system", "content": self.get_routing_prompt()}]
-                for msg in history:
-                    role = msg["role"]
-                    if role == "YOU":
-                        role = "user"
-                    elif role == "J.A.R.V.I.S.":
-                        role = "assistant"
-                    if role in ["user", "assistant", "system"]:
-                        messages.append({"role": role, "content": msg["content"]})
-                        
-                messages.append({"role": "user", "content": user_input})
-                
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-                router_response = response.choices[0].message.content.strip()
-                logger.log(f"Model decision: {router_response}", category="BRAIN")
-                from tools.registry import discover_tools, tool_registry
-                discover_tools()
-                CORE_ROUTER_TOOLS = tool_registry.list_tools()
-                for tool in CORE_ROUTER_TOOLS:
-                    if tool.name in router_response:
-                        logger.log(f"Textual tool call pattern detected for '{tool.name}'. Executing core tool...", category="TOOL")
-                        
-                        # Parse arguments if any
-                        import re
-                        import ast
-                        args = ()
-                        kwargs = {}
-                        pattern = rf"{tool.name}\((.*?)\)"
-                        match = re.search(pattern, router_response)
-                        if match:
-                            args_str = match.group(1).strip()
-                            if args_str:
-                                # Clean up common keyword arguments to positional
-                                for kw in ["query=", "url=", "folder_name=", "file_name=", "content=", "app_name=", "selector_or_label=", "text_or_selector=", "text=", "key=", "fact="]:
-                                    args_str = args_str.replace(kw, "")
-                                try:
-                                    if "," not in args_str:
-                                        args = ast.literal_eval(f"({args_str},)")
-                                    else:
-                                        args = ast.literal_eval(f"({args_str})")
-                                except Exception as parse_err:
-                                    logger.log(f"Failed to parse args for core tool '{tool.name}': {parse_err}", category="SYSTEM")
-                        
-                        try:
-                            result = tool.execute(*args, **kwargs)
-                        except Exception as e:
-                            result = f"Error executing tool '{tool.name}': {str(e)}"
-                            
-                        logger.log(f"Core tool '{tool.name}' returned: {result}", category="TOOL")
-                        messages.append({"role": "assistant", "content": router_response})
-                        messages.append({"role": "user", "content": f"[SYSTEM MESSAGE]: Tool {tool.name} returned:\n{result}\nNow, please answer the user naturally based on this information."})
-                        response = self.client.chat.completions.create(
-                            model=model,
-                            messages=messages,
-                        )
-                        router_response = response.choices[0].message.content.strip()
-                        break
+        # 3. General Case: Route via ProviderManager
+        try:
+            import memory.database as db
+            history = db.get_chat_history(session_id, limit=10)
+            
+            messages = [{"role": "system", "content": self.get_routing_prompt()}]
+            for msg in history:
+                role = msg["role"]
+                if role == "YOU":
+                    role = "user"
+                elif role == "J.A.R.V.I.S.":
+                    role = "assistant"
+                if role in ["user", "assistant", "system"]:
+                    messages.append({"role": role, "content": msg["content"]})
+                    
+            messages.append({"role": "user", "content": user_input})
+            
+            from core.providers import provider_manager
+            task_type = "vision" if is_vision_request else "simple_conversation"
+            
+            response = provider_manager.chat(
+                messages=messages,
+                task_type=task_type
+            )
+            router_response = response.content.strip()
+            logger.log(f"Model decision: {router_response}", category="BRAIN")
 
-                break # Success!
-                
-            except Exception as e:
-                logger.log(f"Router call failed with model {model}: {e}", category="SYSTEM")
-                if attempt < len(self.fallback_models):
-                    logger.log("Attempting fallback model...", category="SYSTEM")
-                    continue
-                else:
-                    # Fallback to Gemini if all OpenRouter models fail
-                    if self.gemini_chat:
-                        logger.log("All OpenRouter models failed. Falling back to Gemini Chat...", category="SYSTEM")
-                        try:
-                            router_response = self.gemini_chat.send_message(user_input).text.strip()
-                            break
-                        except Exception as g_error:
-                            logger.log(f"Gemini Fallback failed: {g_error}", category="SYSTEM")
-                            return f"Critical System Failure: Both Cloud Providers failed. {str(g_error)}"
-                    else:
-                        error_str = str(e)
-                        if "429" in error_str or "402" in error_str or "rate limit" in error_str.lower():
-                            return "I apologize, sir, but our free cloud computing limits have been temporarily exhausted. Please wait a moment before trying again."
-                        return f"Cloud Brain Error: {error_str}"
+            # Execute tool textually if detected in the response
+            from tools.registry import discover_tools, tool_registry
+            discover_tools()
+            CORE_ROUTER_TOOLS = tool_registry.list_tools()
+            for tool in CORE_ROUTER_TOOLS:
+                if tool.name in router_response:
+                    logger.log(f"Textual tool call pattern detected for '{tool.name}'. Executing core tool...", category="TOOL")
+                    
+                    import re
+                    import ast
+                    args = ()
+                    kwargs = {}
+                    pattern = rf"{tool.name}\((.*?)\)"
+                    match = re.search(pattern, router_response)
+                    if match:
+                        args_str = match.group(1).strip()
+                        if args_str:
+                            for kw in ["query=", "url=", "folder_name=", "file_name=", "content=", "app_name=", "selector_or_label=", "text_or_selector=", "text=", "key=", "fact="]:
+                                args_str = args_str.replace(kw, "")
+                            try:
+                                if "," not in args_str:
+                                    args = ast.literal_eval(f"({args_str},)")
+                                else:
+                                    args = ast.literal_eval(f"({args_str})")
+                            except Exception as parse_err:
+                                logger.log(f"Failed to parse args for core tool '{tool.name}': {parse_err}", category="SYSTEM")
+                    
+                    try:
+                        result = tool.execute(*args, **kwargs)
+                    except Exception as e:
+                        result = f"Error executing tool '{tool.name}': {str(e)}"
+                        
+                    logger.log(f"Core tool '{tool.name}' returned: {result}", category="TOOL")
+                    messages.append({"role": "assistant", "content": router_response})
+                    messages.append({"role": "user", "content": f"[SYSTEM MESSAGE]: Tool {tool.name} returned:\n{result}\nNow, please answer the user naturally based on this information."})
+                    
+                    response = provider_manager.chat(
+                        messages=messages,
+                        task_type=task_type
+                    )
+                    router_response = response.content.strip()
+                    break
+        except Exception as e:
+            logger.log(f"Router call failed: {e}", category="SYSTEM")
+            error_str = str(e)
+            if "429" in error_str or "rate limit" in error_str.lower():
+                return "I apologize, sir, but our cloud computing limits have been temporarily exhausted. Please wait a moment before trying again."
+            return f"Cloud Brain Error: {error_str}"
             
         # 3. Check for delegation
         if "DELEGATE_TO:" in router_response:
@@ -401,7 +314,7 @@ If you are answering the user directly, answer as J.A.R.V.I.S. and always end wi
                 agent_name = "Coder"
             elif "Researcher" in agent_name:
                 agent_name = "Researcher"
-
+ 
             all_ags = self.all_agents
             if agent_name in all_ags:
                 agent = all_ags[agent_name]

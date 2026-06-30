@@ -142,6 +142,19 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Create provider metrics table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS provider_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                tokens INTEGER,
+                latency REAL,
+                cost_estimate REAL,
+                success INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     # Run safe column migrations
     migrate_db()
